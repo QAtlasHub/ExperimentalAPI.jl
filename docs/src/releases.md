@@ -1,3 +1,7 @@
+```@meta
+CurrentModule = ExperimentalAPI
+```
+
 # Release decisions
 
 The payoff for marking anything at all: *"changing an experimental name is not breaking"* stops

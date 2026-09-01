@@ -6,6 +6,7 @@ makedocs(;
     format=Documenter.HTML(;
         canonical="https://codes.sota-shimozono.com/ExperimentalAPI.jl/stable/",
         prettyurls=get(ENV, "CI", "false") == "true",
+        edit_link="main",
     ),
     modules=[ExperimentalAPI],
     # `:public` is the same claim this package makes about its users: a name on the public

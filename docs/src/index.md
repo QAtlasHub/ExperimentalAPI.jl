@@ -1,3 +1,7 @@
+```@meta
+CurrentModule = ExperimentalAPI
+```
+
 # ExperimentalAPI.jl
 
 `public` says who may call a name. Nothing says whether the name is finished.

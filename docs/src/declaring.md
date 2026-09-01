@@ -1,3 +1,7 @@
+```@meta
+CurrentModule = ExperimentalAPI
+```
+
 # Declaring
 
 ## The two forms

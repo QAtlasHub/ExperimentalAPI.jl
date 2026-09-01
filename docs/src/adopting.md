@@ -1,3 +1,7 @@
+```@meta
+CurrentModule = ExperimentalAPI
+```
+
 # Adopting it
 
 The interesting case is not a new package. It is a package that already has thirty public names

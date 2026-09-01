@@ -1,3 +1,7 @@
+```@meta
+CurrentModule = ExperimentalAPI
+```
+
 # Checking
 
 This is the part the rest of the package exists for.
