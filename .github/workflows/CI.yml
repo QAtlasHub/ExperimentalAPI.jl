@@ -1,0 +1,75 @@
+name: CI
+
+# A version matrix rather than a shard matrix, deliberately. This suite runs in about half a
+# minute, so splitting it would cost more setup than it saves — but the mechanism it tests sits
+# directly on three things the language has been moving under it: the `public` keyword (1.11),
+# `names()` reporting public names, and 1.12's rule about reading a binding created in the same
+# world age. Which Julia this runs on is the variable that actually finds bugs here.
+#
+# `test/test_precompile.jl` spawns its own subprocesses with `--depwarn=error`, so the deprecation
+# that would precede a hard failure on the next Julia fails the job rather than scrolling past.
+
+on:
+  push:
+    branches: [main]
+    tags: '*'
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: julia ${{ matrix.julia }} — ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.julia == 'nightly' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        julia: ['1.11', '1.12']
+        os: [ubuntu-latest]
+        include:
+          # The floor and the current release on one other platform each: the `const`-in-a-block
+          # emission and the depot layout the precompile test builds are the parts most likely to
+          # be platform-sensitive, and neither has ever been run anywhere but Linux.
+          - { julia: '1.12', os: macos-latest }
+          - { julia: '1.12', os: windows-latest }
+          # Allowed to fail, but not allowed to be invisible.
+          - { julia: 'nightly', os: ubuntu-latest }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: ${{ matrix.julia }}
+      - uses: julia-actions/cache@v3
+      - uses: julia-actions/julia-buildpkg@v1
+      - uses: julia-actions/julia-runtest@v1
+      - uses: julia-actions/julia-processcoverage@v1
+        if: matrix.julia == '1.12' && matrix.os == 'ubuntu-latest'
+      - uses: codecov/codecov-action@v5
+        if: matrix.julia == '1.12' && matrix.os == 'ubuntu-latest'
+        with:
+          files: lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+  docs:
+    name: Docs build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1.12'
+      - uses: julia-actions/cache@v3
+      # `checkdocs = :public` in `docs/make.jl` makes this the same claim the package asks its
+      # users to make: a public name with no docstring fails the build. The package's own
+      # release layer passes it by being documented AND declared @experimental.
+      - run: julia --project=docs -e 'using Pkg; Pkg.instantiate(); include("docs/make.jl")'
+        env:
+          GKSwstype: nul

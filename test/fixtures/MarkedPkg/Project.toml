@@ -1,0 +1,6 @@
+name = "MarkedPkg"
+uuid = "b1a55f4e-0b6e-4c9a-9a2f-3d5e6c7a8b90"
+version = "0.1.0"
+
+[deps]
+ExperimentalAPI = "fd2d14cb-3a46-42a9-afd8-e8499236f05e"

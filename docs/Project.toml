@@ -1,0 +1,6 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+ExperimentalAPI = "fd2d14cb-3a46-42a9-afd8-e8499236f05e"
+
+[sources]
+ExperimentalAPI = {path = ".."}
