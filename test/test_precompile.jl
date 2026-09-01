@@ -14,6 +14,12 @@ using Test: @test, @testset
 
 const FIXTURE = joinpath(@__DIR__, "fixtures", "MarkedPkg")
 
+# Windows separates the entries of an environment path list with `;`, every other platform with
+# `:`. Getting it wrong does not produce a subtly wrong depot — the child cannot find `Pkg` at
+# all, which is how the first Windows run this package ever had failed while all 239 other tests
+# on that runner passed.
+const PATHSEP = Sys.iswindows() ? ";" : ":"
+
 const PROBE = """
 using MarkedPkg, ExperimentalAPI
 marks = ExperimentalAPI.experimental(MarkedPkg)

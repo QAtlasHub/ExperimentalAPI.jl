@@ -60,8 +60,10 @@ reported, so the list can only shrink.
 
 ## Install
 
+Not in the General registry yet — install by URL:
+
 ```julia
-pkg> add ExperimentalAPI
+pkg> add https://github.com/QAtlasHub/ExperimentalAPI.jl
 ```
 
 It is loaded by the package being marked, so it is a normal dependency — but it pulls in nothing
