@@ -8,11 +8,15 @@
 
 `public` says who may call a name. Nothing says whether the name is finished.
 
-So "this will change" lives in a docstring sentence, and no tool reads it. ExperimentalAPI puts
-that claim at the definition site, in a form a tool can query — and then turns it into a check
-your CI runs:
+Julia already checks half of that. `Docs.undocumented_names` has been public API in Base since
+1.11, and `Aqua.test_undocumented_names` ships it as a test: every public name must carry a
+docstring. What neither can express is the **third option** —
 
-**every public name is either documented or declared unfinished, and there is no third option.**
+> this name is public, it has no docstring, and that is deliberate: the shape is not settled,
+> and here is why.
+
+ExperimentalAPI adds that option at the definition site, and makes it something a tool reads
+rather than prose a human might happen to notice.
 
 ```julia
 using ExperimentalAPI
@@ -129,6 +133,33 @@ promise withdrawn is a change to what callers were told.
 > arguments changed is a breaking change it cannot see. Read the diff as a floor on breakage,
 > never as a clearance.
 
+## Why this cannot be a feature of Aqua
+
+A mark is written in `src/`, on the line above the definition, so the package being marked has to
+depend on whatever provides `@experimental` at run time. **Aqua is a test-only dependency.** It can
+own the check; it structurally cannot own the declaration.
+
+The check here is also not the same set difference. `Docs.undocumented_names` reports every public
+name without a docstring — including names re-exported from a dependency, whose prose is somebody
+else's job:
+
+```julia
+julia> names(Down)                      # `up` and `undoc_up` come from a dependency
+4-element Vector{Symbol}:
+ :Down, :own_undoc, :undoc_up, :up
+
+julia> Docs.undocumented_names(Down)    # the dependency's gap, reported as yours
+3-element Vector{Symbol}:
+ :Down, :own_undoc, :undoc_up
+
+julia> audit(Down).unaccounted           # only what this module actually owns
+1-element Vector{Symbol}:
+ :own_undoc
+```
+
+`audit` separates those as `foreign`, and adds `dangling` — a mark on a name that was never made
+public, which is the module contradicting itself and needs no reference to be wrong.
+
 ## What this is not
 
 | axis | already solved by | this package |
@@ -136,6 +167,7 @@ promise withdrawn is a change to what callers were told.
 | who may call a name | `export`, `public` (1.11) | orthogonal — a name can be public and unfinished |
 | a name on its way out | `@deprecate` | opposite direction |
 | type stability | DispatchDoctor | unrelated |
+| every public name has a docstring | `Docs.undocumented_names` (Base 1.11+), `Aqua.test_undocumented_names` | the same check, plus a third answer |
 | generating documentation | Documenter | only ever checks whether prose exists |
 | run-time behaviour | — | calls are untouched |
 
@@ -150,25 +182,6 @@ reads as if it had none:
 - **Names public only inside an extension**, which is a separate module.
 - **Whether a name appears in your guide, README or docs site.** Docstring presence is not
   documentation-page presence, and those two gaps are usually different sets.
-
-## Measured
-
-Run against five packages that had never heard of it, September 2026 — the audit is only worth
-having if a clean package comes back clean and a gap comes back named:
-
-| package | public names | documented | foreign | unaccounted |
-|---|---|---|---|---|
-| Pinax | 46 | 45 | — | `Theme` |
-| Archeion | 36 | 33 | — | `FTPSTransport`, `pull_file`, `push_dir` |
-| TestShards | 3 | 3 | — | — |
-| DataVault | 33 | 32 | `DataKey` | — |
-| ParamIO | 13 | 13 | — | — |
-
-`DataKey` is re-exported from a dependency, which is why it is not DataVault's to account for.
-
-None of these had a single mark; the whole column came from docstrings. That is the expected
-starting point — the marks are what the four remaining names get *instead of* a docstring, if
-their authors decide they are not settled.
 
 ## License
 

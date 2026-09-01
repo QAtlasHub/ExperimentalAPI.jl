@@ -88,8 +88,9 @@ end
 end
 
 @testset "isdocumented reads prose, not marks" begin
-    # This pins `Base.Docs.hasdoc`, which is not public Base API — if it ever stops separating
-    # these two cases, this test is where that surfaces rather than in a consumer's CI.
+    # Pins `Base.Docs.hasdoc`'s behaviour, including that it follows a re-export back to the
+    # module the binding comes from. `audit` leans on that to keep `foreign` apart from a real
+    # gap, so if it ever changes this is where it surfaces rather than in a consumer's CI.
     @test isdocumented(Audited, :exported_documented)
     @test isdocumented(Audited, :public_documented)
     @test !isdocumented(Audited, :public_silent)

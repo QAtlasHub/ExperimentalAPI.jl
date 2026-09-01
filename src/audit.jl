@@ -43,9 +43,11 @@ This answers *whether prose exists*, never whether it is any good. A docstring r
 is documented as far as this package is concerned.
 """
 function isdocumented(m::Module, name::Symbol)
-    # `Docs.hasdoc` is not part of Base's public API. It is what Documenter's `checkdocs` uses,
-    # so it is de-facto stable; `test/test_audit.jl` pins both the documented/undocumented split
-    # AND the re-export behaviour relied on here, so this stops being an assumption.
+    # `Docs.hasdoc` is public API — `public`, and exported from `Base.Docs`. Its set-valued
+    # sibling `Docs.undocumented_names` answers the same question for a whole module at once and
+    # is what `Aqua.test_undocumented_names` is built on; the per-name form is used here because
+    # `audit` has to tell a module's own gap apart from a dependency's, and the set form reports
+    # a re-exported name's missing docstring as though it were this module's to fix.
     return Base.Docs.hasdoc(m, name)
 end
 

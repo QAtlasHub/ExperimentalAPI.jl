@@ -1,6 +1,6 @@
 name = "ExperimentalAPI"
 uuid = "fd2d14cb-3a46-42a9-afd8-e8499236f05e"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["sota shimozono <shimozono-sota631@g.ecc.u-tokyo.ac.jp>"]
 
 [deps]
