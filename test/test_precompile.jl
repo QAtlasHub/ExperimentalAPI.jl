@@ -30,6 +30,7 @@ println("TRACKING=", ExperimentalAPI.mark(MarkedPkg, :unsettled).tracking)
 println("UNACCOUNTED=", join(sort(string.(ExperimentalAPI.audit(MarkedPkg).unaccounted)), ","))
 println("STABLE=", join(sort(string.(ExperimentalAPI.stable(MarkedPkg))), ","))
 println("CACHED=", Base.isprecompiled(Base.PkgId(MarkedPkg)))
+println("DEPOT1=", first(DEPOT_PATH))
 """
 
 function parse_probe(out)
@@ -48,12 +49,18 @@ function run_probe(env, depots)
     return parse_probe(read(subprocess_env(cmd, depots), String))
 end
 
-# `Pkg.test` exports a JULIA_LOAD_PATH pointing at ITS temporary environment and omitting
-# `@stdlib`; inherited, it silently overrides `--project` and the child cannot even load Pkg.
+# The child's environment is BUILT, not patched. `Pkg.test` exports a JULIA_LOAD_PATH pointing at
+# its own temporary environment and omitting `@stdlib`; inherited, that overrides `--project` and
+# the child cannot even load Pkg. Deleting the variable outright — rather than overwriting it with
+# a hand-built list — leaves Julia's own default (`@:@v#.#:@stdlib`) in charge, which is both what
+# is wanted and one fewer platform-specific string to get right.
+#
+# `setenv` REPLACES the environment rather than adding to it, so the base has to be `copy(ENV)`.
 function subprocess_env(cmd, depots)
-    return addenv(
-        cmd, "JULIA_DEPOT_PATH" => join(depots, ":"), "JULIA_LOAD_PATH" => "@:@stdlib"
-    )
+    env = copy(ENV)
+    delete!(env, "JULIA_LOAD_PATH")
+    env["JULIA_DEPOT_PATH"] = join(depots, PATHSEP)
+    return setenv(cmd, env)
 end
 
 @testset "marks survive precompilation" begin
@@ -80,6 +87,10 @@ end
         cold = run_probe(env, depots)   # compiles the fixture
         warm = run_probe(env, depots)   # loads it from the cache the cold run wrote
 
+        # If JULIA_DEPOT_PATH did not take, the caches below went into the developer's real
+        # depot and the "compiled fresh, then read back" claim is about the wrong depot. That
+        # failure is otherwise silent, and silent pollution is worse than a red test.
+        @test cold["DEPOT1"] == first(depots)
         @test warm["CACHED"] == "true"
         @testset "$phase" for (phase, r) in
                               ("compiled from source" => cold, "from cache" => warm)
