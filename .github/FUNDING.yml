@@ -1,0 +1,5 @@
+# Matches the per-repo file carried by Pinax.jl, DataVault.jl, ParamIO.jl and QAtlas.jl.
+# The org-wide default in QAtlasHub/.github lists only `github`; repos that ship their own
+# add the second button, so this file exists to add it rather than to restate the default.
+github: sotashimozono
+buy_me_a_coffee: sotashimozono
