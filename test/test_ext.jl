@@ -64,11 +64,15 @@ end
     @test !isempty(methods(test_surface))
 end
 
-@testset "a clean module passes" begin
+@testset "a clean module passes, and not vacuously" begin
     ts = Test.@testset Recorder "clean" begin
         test_surface(Clean)
     end
     @test isempty(failures(ts))
+    # Every other assertion iterates over findings, so on a clean module they all collapse to
+    # nothing. Without the summary pair, `0 tests passed` would be the green — the same output
+    # a module with no public surface, or a broken extension, would produce.
+    @test length(leaves(ts)) >= 2
 end
 
 @testset "a dirty module fails, and names what is wrong" begin
@@ -79,16 +83,18 @@ end
     @test "silent_one is documented or @experimental" in names
     @test "silent_two is documented or @experimental" in names
     @test "@experimental not_public is public" in names
+    @test "nothing unaccounted for" in names        # the summary pair fails too
     # The documented name is not among the complaints.
     @test !any(occursin("documented is", n) for n in names)
-    @test length(names) == 3
+    @test length(names) == 4
 end
 
 @testset "skip suppresses a known gap" begin
     ts = Test.@testset Recorder "skipped" begin
         test_surface(Dirty; skip=[:silent_one, :silent_two])
     end
-    @test failed_names(ts) == Set(["@experimental not_public is public"])
+    @test failed_names(ts) ==
+        Set(["@experimental not_public is public", "nothing unaccounted for"])
 end
 
 @testset "a stale skip entry fails" begin

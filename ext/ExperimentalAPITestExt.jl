@@ -12,6 +12,14 @@ function ExperimentalAPI.test_surface(
     a = audit(m)
     outputlevel ≥ 1 && show(stdout, MIME"text/plain"(), a)
     @testset "public surface of $(nameof(m))" begin
+        # Two assertions that run whatever the audit found. Everything below iterates over a set
+        # of findings, so on a clean module all of it collapses to nothing and the testset would
+        # report `0 tests passed` — a green indistinguishable from the extension having failed to
+        # load, or from `m` having no public names at all. These make the pass mean something.
+        @testset "nothing unaccounted for" begin
+            @test isempty(setdiff(a.unaccounted, skip))
+            @test isempty(a.dangling)
+        end
         # One testset per name, so a failing CI log names the symbol in its header rather than
         # printing a set difference the reader has to diff by eye.
         @testset "$n is documented or @experimental" for n in setdiff(a.unaccounted, skip)

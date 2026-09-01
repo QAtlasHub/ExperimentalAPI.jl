@@ -1,6 +1,6 @@
 # ExperimentalAPI.jl
 
-[![docs: stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://qatlashub.github.io/ExperimentalAPI.jl/stable/)
+[![docs: dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://qatlashub.github.io/ExperimentalAPI.jl/dev/)
 [![codecov](https://codecov.io/gh/QAtlasHub/ExperimentalAPI.jl/branch/main/graph/badge.svg)](https://app.codecov.io/gh/QAtlasHub/ExperimentalAPI.jl)
 [![Julia](https://img.shields.io/badge/julia-v1.11+-9558b2.svg)](https://julialang.org)
 [![Code Style: Blue](https://img.shields.io/badge/Code%20Style-Blue-4495d1.svg)](https://github.com/invenia/BlueStyle)
