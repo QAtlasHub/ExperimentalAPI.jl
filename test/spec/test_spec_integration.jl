@@ -70,13 +70,33 @@ end
 
 @testset "removing a marked METHOD is not breaking" begin
     # The same contract as for names, at the granularity that matters for a dispatch table.
-    @test_broken ExperimentalAPI.compare_methods isa Function
+    # These two testsets used to share a byte-identical `compare_methods isa Function`, so both
+    # would flip the instant the function existed, with neither behavioural claim ever checked.
+    @test_broken !ExperimentalAPI.isbreaking(
+        ExperimentalAPI.compare_methods(
+            Dict("methods" => Dict("f(::Int)" => Dict("reason" => "r"))),
+            Dict("methods" => Dict()),
+        ),
+    )
+end
+
+@testset "removing a SETTLED method is breaking" begin
+    # The negative control for the testset above: same shape, unmarked method, opposite verdict.
+    @test_broken ExperimentalAPI.isbreaking(
+        ExperimentalAPI.compare_methods(
+            Dict("stable_methods" => ["f(::Int)"]), Dict("stable_methods" => String[])
+        ),
+    )
 end
 
 @testset "a signature change to a settled method is reported as breaking" begin
     # The blind spot `compare` currently admits to in its own docstring. Method-level marks are
     # what make it addressable at all.
-    @test_broken ExperimentalAPI.compare_methods isa Function
+    @test_broken ExperimentalAPI.isbreaking(
+        ExperimentalAPI.compare_methods(
+            Dict("stable_methods" => ["f(::Int)"]), Dict("stable_methods" => ["f(::Real)"])
+        ),
+    )
 end
 
 # ── the provenance record next to a result ───────────────────────────────────────────────────
@@ -90,8 +110,12 @@ end
 
 @testset "the stamp is readable without loading the package that made it" begin
     # A year later the package may not resolve. Plain TOML or JSON, not a serialised Julia object.
-    path = tempname()
-    @test_broken occursin("reference value", read(path, String))
+    # The path has to go through `stamp` first — reading a bare `tempname()` throws SystemError
+    # for a reason that has nothing to do with the claim.
+    @test_broken occursin(
+        "reference value",
+        read(ExperimentalAPI.stamp(tempname(), () -> Shown.provisional(1)), String),
+    )
 end
 
 @testset "a stamped result names the package versions involved" begin

@@ -13,6 +13,20 @@ are `@test_broken`.
 So the spec cannot silently rot in either direction: it neither blocks work that has not been
 done, nor lets finished work go unnoticed.
 
+One caveat, measured rather than assumed: an expression whose value is not a `Bool` — an
+`@eval module … end`, whose value is a `Module` — reports `Error: Expression evaluated to
+non-Boolean` instead of `Unexpected Pass`. Both fail the suite loudly, so nothing rots either
+way, but every `@eval module` block in this directory now ends in a `Bool` and checks *what* got
+marked, so the message is the expected one and the assertion has content beyond "it parsed".
+
+## Overlap with `test/test_*.jl`
+
+`test_spec_declare.jl` re-covers definition forms that `test/test_mark.jl` already pins, and
+`test_spec_docstring.jl` re-covers part of `test/test_audit.jl`'s bucket contract, through
+separate fixtures. That is deliberate while the spec is the design document — but two fixtures
+pinning one contract have to be kept in sync by hand, so the older files should be folded in or
+retired once the spec stops moving.
+
 Anything already implemented is a plain `@test`. The ratio of `@test` to `@test_broken` in this
 directory is the honest progress measure.
 

@@ -19,10 +19,14 @@
 # reports "no experimental dependency" about a call graph it could not see has not made a weaker
 # claim, it has made a false one.
 #
-# Feasibility was measured on 2026-09-03 with a custom `Core.Compiler.AbstractInterpreter`
-# hooking `abstract_call_method`. Inference runs before inlining, so the call graph is intact
-# there; post-processing `code_typed(...; optimize=true)` sees only `mul_float`/`add_float` and
-# finds nothing.
+# Feasibility was measured on 2026-09-03, **Julia 1.12.2**, with a custom
+# `Core.Compiler.AbstractInterpreter` hooking `abstract_call_method`. Inference runs before
+# inlining, so the call graph is intact there; post-processing `code_typed(...; optimize=true)`
+# sees only `mul_float`/`add_float` and finds nothing.
+#
+# The Julia version is load-bearing and is stated for the same reason `Lean 4.33.1` is above:
+# `Core.Compiler` is internal and carries no stability guarantee across releases. This repository's
+# CI spans 1.11 and 1.12, and the measurement was taken on one of them.
 
 using ExperimentalAPI: ExperimentalAPI, @experimental, experimental
 using Test
@@ -79,6 +83,15 @@ top_table(i::Int, x::Float64) = TABLE[i](x)
 
 # termination
 top_recursive(n::Int, x::Float64) = n <= 0 ? unstable(x) : top_recursive(n - 1, x)
+
+# A chain deep enough that a depth limit MUST truncate before reaching the mark. `top_recursive`
+# calls `unstable` in its own body, so it is visible at depth 1 whatever `maxdepth` says — a
+# depth test written against it would pass for an implementation that ignores the keyword.
+deep_5(x::Float64) = unstable(x)
+deep_4(x::Float64) = deep_5(x)
+deep_3(x::Float64) = deep_4(x)
+deep_2(x::Float64) = deep_3(x)
+deep_1(x::Float64) = deep_2(x)
 top_mutual_a(n::Int, x::Float64) = n <= 0 ? unstable(x) : top_mutual_b(n - 1, x)
 top_mutual_b(n::Int, x::Float64) = top_mutual_a(n - 1, x)
 
@@ -163,9 +176,15 @@ end
 end
 
 @testset "a depth limit reports :unknown rather than :clean" begin
+    # `deep_1` is five hops from the mark, so `maxdepth=2` must truncate. Asserting `:unknown`
+    # rather than `!== :clean` is what separates "the limit produced the honest non-answer" from
+    # "the limit was silently ignored and the mark was found anyway".
     @test_broken ExperimentalAPI.verdict(
-        ExperimentalAPI.reach(Chain.top_recursive, Tuple{Int,Float64}; maxdepth=1)
-    ) !== :clean
+        ExperimentalAPI.reach(Chain.deep_1, ENTRY; maxdepth=2)
+    ) === :unknown
+    # …and the same entry point WITHOUT the limit finds it, so the fixture can disagree.
+    @test_broken ExperimentalAPI.verdict(ExperimentalAPI.reach(Chain.deep_1, ENTRY)) ===
+        :depends
 end
 
 # ── termination ──────────────────────────────────────────────────────────────────────────────
@@ -214,12 +233,17 @@ end
 
 # ── cost ─────────────────────────────────────────────────────────────────────────────────────
 
-@testset "analysis is opt-in and costs nothing when not asked for" begin
-    # `@experimental` emits the definition unchanged plus one `push!` at load time. Whatever the
-    # analysis costs, it must not move into the marked package's own load or call path.
-    @test isempty(
-        filter(
-            m -> occursin("reach", String(m.name)), collect(methods(ExperimentalAPI._mark!))
-        ),
-    )
+@testset "the macro emits nothing but the definition and one push" begin
+    # The previous version of this test filtered `methods(_mark!)` for a name containing "reach".
+    # `Method.name` is the GENERIC FUNCTION's name — always `:_mark!`, never derived from what the
+    # body calls — so the filter was unconditionally empty and the assertion could not fail even
+    # if `_mark!` called `reach` directly. Look at the expansion instead.
+    emitted = string(@macroexpand @experimental "why" f(x) = x)
+    @test occursin("_mark!", emitted)                       # the one load-time effect
+    @test occursin("__EXPERIMENTAL_API_MARKS__", emitted)
+    for forbidden in ("reach", "verdict", "record", "abstract_call_method", "code_typed")
+        @testset "no $forbidden in the expansion" begin
+            @test !occursin(forbidden, emitted)
+        end
+    end
 end

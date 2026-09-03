@@ -4,7 +4,7 @@
 # unverified code paths did it go through, and how often? A docstring cannot answer that. This is
 # the part of the intent that a reviewer cannot dismiss as "put it in the docstring".
 #
-# Two routes were measured on 2026-09-03, and the cheap one does NOT work:
+# Two routes were measured on 2026-09-03, **Julia 1.12.2**, and the cheap one does NOT work:
 #
 #   sampling profiler + Method-set membership   -> 0 samples attributed
 #       `Profile.fetch` frames for inlined callees carry no `MethodInstance`, so exactly the
@@ -42,8 +42,11 @@ end # module Hot
     # The property the package currently advertises and must keep: `@experimental` emits the
     # definition unchanged plus one `push!` at load time. If instrumentation ever becomes
     # unconditional, an inner loop pays for it on every iteration.
-    src = read(joinpath(@__DIR__, "..", "..", "src", "mark.jl"), String)
-    @test occursin("emitted unchanged", src) || occursin("costs nothing at run time", src)
+    # Reading `src/mark.jl` for a prose phrase would pass for a regression that wrapped the call
+    # and left the sentence alone. Look at what the macro emits.
+    emitted = string(@macroexpand @experimental "why" f(x) = x)
+    @test occursin("f(x)", emitted)                # the definition is there…
+    @test !occursin("function f", replace(emitted, "f(x)" => ""))   # …and not wrapped in another
     @test Hot.driver(3, 1.0) ≈ 3 * 1.0000001
 end
 
@@ -94,7 +97,7 @@ end
 end
 
 @testset "the record attributes to a method, not just a name" begin
-    # `QAtlas.fetch` has 570 methods. "the run touched `fetch`" is not usable; "the run took the
+    # `QAtlas.fetch` has 570 methods (measured 2026-09-03, not re-derived here). "the run touched `fetch`" is not usable; "the run took the
     # Numerical × Float64 path 4.7M times" is.
     @test_broken first(ExperimentalAPI.record(() -> Hot.driver(10, 1.0))).method isa Method
 end

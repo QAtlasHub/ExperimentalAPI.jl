@@ -5,9 +5,14 @@
 # should always have a docstring — is correct, and the package never required otherwise; the
 # framing did.
 #
-# Julia's own code settles it. `Base.Experimental` holds 24 entries and the ones sampled on
-# 2026-09-03 (`@optlevel`, `@compiler_options`, `Const`) all carry docstrings. Base marks an
-# experimental surface AND documents it. The two are orthogonal, and this file pins that.
+# Julia's own code settles it: `Base.Experimental` exists, and the entries sampled below carry
+# docstrings. Base marks an experimental surface AND documents it — the two are orthogonal, and
+# this file pins that with named entries rather than a count.
+#
+# No entry count is given on purpose. Measured 2026-09-03 the number moves with both the Julia
+# version and the counting rule (19 filtered / 13 documented on 1.11.9), and nothing here would
+# notice it drifting. The same pattern was deleted from the README one day earlier for exactly
+# this reason.
 
 using ExperimentalAPI:
     ExperimentalAPI, @experimental, audit, experimental, isdocumented, isexperimental, mark

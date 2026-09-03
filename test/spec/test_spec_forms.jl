@@ -8,11 +8,11 @@
 using ExperimentalAPI: ExperimentalAPI, @experimental, experimental, isexperimental, mark
 using Test
 
-module Forms
+module FormsSpec
 
 using ExperimentalAPI
 
-public kw_fn, where_fn, vararg_fn, ret_typed, Callable, Ctor, Gen, KwStruct, INTERP
+public kw_fn, where_fn, vararg_fn, ret_typed, Callable, Ctor, INTERP
 
 @experimental "keyword arguments" kw_fn(x; scale=1.0, kwargs...) = x * scale
 @experimental "parametric" where_fn(x::T, y::T) where {T<:Real} = x + y
@@ -30,22 +30,22 @@ end
 const WHY = "tolerance chosen by hand"
 @experimental "$(WHY); see the sweep in issue 12" INTERP = 1e-8
 
-end # module Forms
+end # module FormsSpec
 
 @testset "forms that already work" begin
-    got = Dict(mk.name => mk for mk in experimental(Forms))
+    got = Dict(mk.name => mk for mk in experimental(FormsSpec))
     for n in (:kw_fn, :where_fn, :vararg_fn, :ret_typed, :INTERP)
         @testset "$n" begin
             @test haskey(got, n)
             @test !isempty(strip(got[n].reason))
         end
     end
-    @test Forms.kw_fn(2.0; scale=3.0) == 6.0
-    @test Forms.where_fn(1, 2) == 3
+    @test FormsSpec.kw_fn(2.0; scale=3.0) == 6.0
+    @test FormsSpec.where_fn(1, 2) == 3
 end
 
 @testset "an interpolated reason is evaluated, not stored as source" begin
-    @test occursin("tolerance chosen by hand", mark(Forms, :INTERP).reason)
+    @test occursin("tolerance chosen by hand", mark(FormsSpec, :INTERP).reason)
 end
 
 # ── forms that are not covered ───────────────────────────────────────────────────────────────
@@ -79,60 +79,84 @@ end
     end
     @experimental "validation not implemented" T(s::AbstractString) = T(parse(Int, s))
     end
-    @test :T in [mk.name for mk in experimental(Main.CtorMarked)]
+    got = Set(mk.name for mk in experimental(Main.CtorMarked))
+    @test :T in got
+    # …and the ARGUMENT name is not also marked. The sibling testset above found exactly that
+    # defect for `(c::C)(x)`; an over-inclusive walk would reintroduce it here unnoticed.
+    @test :s ∉ got
 end
 
 @testset "an inner constructor inside a marked struct is not separately marked" begin
     # Marking the struct should not silently also claim its inner constructors are unfinished,
     # nor silently exclude them. Whichever it is has to be stated.
-    @test_broken hasproperty(mark(Forms, :Callable), :includes_constructors)
+    @test_broken hasproperty(mark(FormsSpec, :Callable), :includes_constructors)
 end
 
 @testset "an operator method can be marked" begin
-    @test_broken @eval module OpMarked
-    using ExperimentalAPI
-    struct V
-        x::Float64
-    end
-    @experimental "no identity element yet" Base.:+(a::V, b::V) = V(a.x + b.x)
+    # `@eval module … end` evaluates to a Module, never a Bool, so wrapping it directly in
+    # `@test_broken` reports "Expression evaluated to non-Boolean" on success rather than the
+    # "Unexpected Pass" this directory relies on. Each of these now ends in a Bool AND checks
+    # WHAT was marked — accepting the syntax while recording the wrong symbol is the defect this
+    # file already caught once, for `(c::C)(x)`.
+    @test_broken begin
+        @eval module OpMarked
+        using ExperimentalAPI
+        struct V
+            x::Float64
+        end
+        @experimental "no identity element yet" Base.:+(a::V, b::V) = V(a.x + b.x)
+        end
+        :+ in [mk.name for mk in experimental(Main.OpMarked)]
     end
 end
 
 @testset "a generated function can be marked" begin
-    @test_broken @eval module GenMarked
-    using ExperimentalAPI
-    @experimental "generator is a prototype" @generated g(x) = :(x)
+    @test_broken begin
+        @eval module GenMarked
+        using ExperimentalAPI
+        @experimental "generator is a prototype" @generated g(x) = :(x)
+        end
+        :g in [mk.name for mk in experimental(Main.GenMarked)]
     end
 end
 
 @testset "Base.@kwdef stacks with the mark" begin
     # `@kwdef` expands to a block carrying `Expr(:meta, :doc)`. Two macros that both wrap a
     # definition must compose in at least one order, and the order that works must be documented.
-    @test_broken @eval module KwdefMarked
-    using ExperimentalAPI
-    @experimental "defaults are guesses" Base.@kwdef struct S
-        a::Int = 1
-    end
+    @test_broken begin
+        @eval module KwdefMarked
+        using ExperimentalAPI
+        @experimental "defaults are guesses" Base.@kwdef struct S
+            a::Int = 1
+        end
+        end
+        :S in [mk.name for mk in experimental(Main.KwdefMarked)]
     end
 end
 
 @testset "@inline and the mark compose in both orders" begin
-    @test_broken @eval module InlineMarked
-    using ExperimentalAPI
-    @experimental "kernel unverified" @inline f(x) = x
-    @inline @experimental "kernel unverified" g(x) = x
+    @test_broken begin
+        @eval module InlineMarked
+        using ExperimentalAPI
+        @experimental "kernel unverified" @inline f(x) = x
+        @inline @experimental "kernel unverified" g(x) = x
+        end
+        Set([mk.name for mk in experimental(Main.InlineMarked)]) == Set([:f, :g])
     end
 end
 
 @testset "a definition produced by @eval can be marked by name" begin
     # Metaprogrammed definitions cannot be attached to; the name-list form is the answer and it
     # has to be reachable.
-    @test_broken @eval module EvalMarked
-    using ExperimentalAPI
-    for n in (:a, :b)
-        @eval $n(x) = x
-    end
-    @experimental "generated in a loop" a b
+    @test_broken begin
+        @eval module EvalMarked
+        using ExperimentalAPI
+        for n in (:a, :b)
+            @eval $n(x) = x
+        end
+        @experimental "generated in a loop" a b
+        end
+        Set([mk.name for mk in experimental(Main.EvalMarked)]) == Set([:a, :b])
     end
 end
 
@@ -177,16 +201,28 @@ end
 
 # ── metadata ─────────────────────────────────────────────────────────────────────────────────
 
-@testset "since must be a version, not a string" begin
-    @test_broken @eval module BadSince
-    using ExperimentalAPI
-    @experimental("why", since = "0.4.0", f(x) = x)
+@testset "since must be a version, and the refusal must say so" begin
+    # It IS refused today, but by accident: `Mark.since::Union{VersionNumber,Nothing}` cannot
+    # convert a String, so the error is
+    #   MethodError: Cannot `convert` an object of type String to an object of type VersionNumber
+    # which names neither `since` nor `@experimental`. A deliberate check would keep throwing, so
+    # asserting "it throws" could never signal that the fix had landed — assert the DIAGNOSTIC.
+    e = try
+        @eval module BadSince
+        using ExperimentalAPI
+        @experimental("why", since = "0.4.0", f(x) = x)
+        end
+        nothing
+    catch err
+        err isa LoadError ? err.error : err
     end
+    @test e isa MethodError                                   # today, and accidental
+    @test_broken occursin("since", sprint(showerror, e))
 end
 
 @testset "an unknown keyword is refused rather than ignored" begin
-    # `@experimental "why" tracking_url="..." f(x)=x` — a typo in a keyword name must not silently
-    # become part of the subject.
+    # `@experimental("why", trackign = "u", f(x) = x)` — a typo in a keyword name must not
+    # silently become part of the subject.
     @test_throws LoadError @eval module BadKw
     using ExperimentalAPI
     @experimental("why", trackign = "u", f(x) = x)
@@ -196,7 +232,7 @@ end
 @testset "tracking is carried through to every report" begin
     # The field that turns a warning into something a reader can act on. It is stored today; it
     # has to survive into the audit and the record as well.
-    @test_broken ExperimentalAPI.audit(Forms).tracking isa AbstractDict
+    @test_broken ExperimentalAPI.audit(FormsSpec).tracking isa AbstractDict
 end
 
 # ── same name, two places ────────────────────────────────────────────────────────────────────

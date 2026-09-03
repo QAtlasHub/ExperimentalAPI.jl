@@ -4,12 +4,14 @@
 # twelve-hour DMRG run the question is not "is this function experimental" but "did the number I
 # am about to put in a paper come out of code nobody has validated, and how much of it".
 #
-# Everything here is `@test_broken`. The cheap route was measured on 2026-09-03 and does not
+# Everything here is `@test_broken`. The cheap route was measured on 2026-09-03, **Julia
+# 1.12.2**, and does not
 # work: `Profile.fetch` frames for inlined callees carry no `MethodInstance`, so a sampling
 # profiler attributes ZERO samples to marked methods — and small functions, which is most of what
 # gets marked, are exactly the ones that get inlined.
 
 using ExperimentalAPI: ExperimentalAPI, @experimental
+using Profile: Profile
 using Test
 
 module Sim
@@ -79,7 +81,7 @@ end
 # ── granularity ──────────────────────────────────────────────────────────────────────────────
 
 @testset "attribution is to a method, not to a name" begin
-    # `QAtlas.fetch` has 570 methods. "the run touched fetch" is unusable.
+    # `QAtlas.fetch` has 570 methods (measured 2026-09-03, not re-derived here). "the run touched fetch" is unusable.
     @test_broken first(ExperimentalAPI.record(() -> Sim.driver(M, 10))).method isa Method
 end
 
@@ -157,6 +159,14 @@ end
 end
 
 # ── concurrency and distribution ─────────────────────────────────────────────────────────────
+
+@testset "the suite runs with more than one thread" begin
+    # `Threads.@threads for _ in 1:8` executes its body 8 times whatever `nthreads()` is, so the
+    # test below would pass for a recorder that is not thread-safe at all if CI ran single
+    # threaded. `.github/workflows/CI.yml` sets `JULIA_NUM_THREADS` for this reason; if that ever
+    # regresses, this fails instead of the concurrency claim silently becoming untestable.
+    @test Threads.nthreads() > 1
+end
 
 @testset "hits from every thread are attributed" begin
     # HPC code is threaded. A recorder that only sees the main thread reports a fraction of the

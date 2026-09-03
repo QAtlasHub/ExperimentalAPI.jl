@@ -1,7 +1,7 @@
 # What can carry a mark.
 #
 # The current implementation marks a NAME. The intent is to mark a definition — and for
-# `QAtlas.fetch`, which has 570 methods behind one name, the name is the wrong unit: a docstring
+# `QAtlas.fetch`, which has 570 methods (measured 2026-09-03, not re-derived here) behind one name, the name is the wrong unit: a docstring
 # on `fetch` cannot say which dispatch path returns a number you can trust.
 #
 # So this file covers both: what works today (plain `@test`) and what the unit has to become
@@ -91,6 +91,18 @@ end # module Declared
     end
 end
 
+@testset "nothing else is reported as marked" begin
+    # Without this, an `experimental()` that leaks every declared name — rather than only the
+    # marked ones — passes every assertion above.
+    got = Set(mk.name for mk in experimental(Declared))
+    @test length(got) == 12
+    for unmarked in (:documented_fn, :energy, :Exact, :Numerical)
+        @testset "$unmarked is not reported" begin
+            @test unmarked ∉ got
+        end
+    end
+end
+
 @testset "the reason travels with every one of them" begin
     for mk in experimental(Declared)
         @test !isempty(strip(mk.reason))
@@ -149,8 +161,13 @@ end
 @testset "a mark inside a package extension is reachable from the parent" begin
     ext = Base.get_extension(ExperimentalAPI, :ExperimentalAPITestExt)
     @test ext !== nothing
-    # Marks declared inside `ext` live in `ext`, and asking the parent must find them.
-    @test_broken !isempty(ExperimentalAPI.experimental(ExperimentalAPI; extensions=true))
+    # `!isempty(...)` would NOT do: ExperimentalAPI marks six of its own names in `src/release.jl`
+    # (dogfooding), so a keyword that is accepted and then completely ignored would satisfy it.
+    # The claim is that a mark whose home is the EXTENSION comes back.
+    @test isempty(ExperimentalAPI.experimental(ext))          # today the extension declares none
+    @test_broken any(
+        mk -> mk.mod === ext, ExperimentalAPI.experimental(ExperimentalAPI; extensions=true)
+    )
 end
 
 @testset "auditing a package does not silently ignore its extensions" begin
