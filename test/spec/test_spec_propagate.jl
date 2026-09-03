@@ -1,0 +1,225 @@
+# Propagation: a caller that never names a marked thing still depends on it.
+#
+# The model is Lean's `sorry`. Measured 2026-09-03 with Lean 4.33.1:
+#
+#     P.lean:1:8: warning: declaration uses `sorry`
+#     'unproven'   depends on axioms: [sorryAx]
+#     'downstream' depends on axioms: [sorryAx]     <- never wrote `sorry` itself
+#     'honest'     does not depend on any axioms
+#
+# Julia cannot match that exactly, and the difference is the most important thing in this file.
+# Lean's kernel has a closed dependency graph of proof terms; Julia's call graph is not closed.
+# So the answer is not a Bool. It is three-valued:
+#
+#     :depends   a marked definition is reachable
+#     :clean     the whole call graph was resolved and nothing marked is in it
+#     :unknown   some call site could not be resolved — the honest non-answer
+#
+# Collapsing `:unknown` into `:clean` is the one failure this file exists to prevent. A tool that
+# reports "no experimental dependency" about a call graph it could not see has not made a weaker
+# claim, it has made a false one.
+#
+# Feasibility was measured on 2026-09-03 with a custom `Core.Compiler.AbstractInterpreter`
+# hooking `abstract_call_method`. Inference runs before inlining, so the call graph is intact
+# there; post-processing `code_typed(...; optimize=true)` sees only `mul_float`/`add_float` and
+# finds nothing.
+
+using ExperimentalAPI: ExperimentalAPI, @experimental, experimental
+using Test
+
+module Chain
+
+using ExperimentalAPI
+
+public unstable,
+    solid,
+    mid_bad,
+    mid_good,
+    top_bad,
+    top_good,
+    top_arg,
+    top_nospec,
+    top_field,
+    top_table,
+    top_recursive,
+    top_mutual_a,
+    CONSTANT_BAD,
+    top_uses_const,
+    MarkedStruct,
+    top_constructs
+
+@experimental "convergence is not established below β ≈ 0.1" unstable(x::Float64) =
+    x * 1.0000001
+"Settled."
+solid(x::Float64) = x * 2.0
+
+# one hop
+mid_bad(x::Float64) = unstable(x) + 1.0
+mid_good(x::Float64) = solid(x) + 1.0
+
+# two hops — neither `top_*` mentions `unstable`
+top_bad(x::Float64) = mid_bad(x) * 3
+top_good(x::Float64) = mid_good(x) * 3
+
+# a function passed as a value. Julia specialises on `typeof(f)`, so inference resolves this.
+apply(f, x::Float64) = f(x)
+top_arg(x::Float64) = apply(unstable, x)
+
+# `@nospecialize` — measured to STILL resolve
+top_nospec(@nospecialize(f), x::Float64) = f(x)
+
+# genuinely unresolvable: the callee is a value chosen at run time
+struct Holder
+    f::Function
+end
+top_field(h::Holder, x::Float64) = h.f(x)
+
+const TABLE = Function[unstable, solid]
+top_table(i::Int, x::Float64) = TABLE[i](x)
+
+# termination
+top_recursive(n::Int, x::Float64) = n <= 0 ? unstable(x) : top_recursive(n - 1, x)
+top_mutual_a(n::Int, x::Float64) = n <= 0 ? unstable(x) : top_mutual_b(n - 1, x)
+top_mutual_b(n::Int, x::Float64) = top_mutual_a(n - 1, x)
+
+# a marked const is not a call site — a different mechanism is needed to see its use
+@experimental "the tolerance is a guess" const CONSTANT_BAD = 1e-8
+top_uses_const(x::Float64) = x + CONSTANT_BAD
+
+# a marked struct: construction is a call, field access is not
+@experimental "layout not settled" struct MarkedStruct
+    v::Float64
+end
+top_constructs(x::Float64) = MarkedStruct(x).v
+
+end # module Chain
+
+const ENTRY = Tuple{Float64}
+
+@testset "the mark itself is in place, so the fixture can disagree" begin
+    names = Set(mk.name for mk in experimental(Chain))
+    @test :unstable in names
+    @test :CONSTANT_BAD in names
+    @test :MarkedStruct in names
+    @test :solid ∉ names          # the negative control really is unmarked
+end
+
+# ── the core claim ───────────────────────────────────────────────────────────────────────────
+
+@testset "a caller two hops away is reported as depending" begin
+    @test_broken ExperimentalAPI.verdict(ExperimentalAPI.reach(Chain.top_bad, ENTRY)) ===
+        :depends
+    @test_broken :unstable in
+        [mk.name for mk in ExperimentalAPI.reach(Chain.top_bad, ENTRY).reached]
+end
+
+@testset "an equally deep caller with nothing marked is reported clean" begin
+    # Without this the previous test passes for a tool that always says `:depends`.
+    @test_broken ExperimentalAPI.verdict(ExperimentalAPI.reach(Chain.top_good, ENTRY)) ===
+        :clean
+    @test_broken isempty(ExperimentalAPI.reach(Chain.top_good, ENTRY).reached)
+end
+
+@testset "a function passed as a value is still followed" begin
+    # Measured: Julia specialises on `typeof(f)`, so this resolves. It is NOT a dynamic hole.
+    @test_broken ExperimentalAPI.verdict(ExperimentalAPI.reach(Chain.top_arg, ENTRY)) ===
+        :depends
+end
+
+@testset "@nospecialize does not hide the callee" begin
+    @test_broken ExperimentalAPI.verdict(
+        ExperimentalAPI.reach(Chain.top_nospec, Tuple{typeof(Chain.unstable),Float64})
+    ) === :depends
+end
+
+# ── the honest non-answer ────────────────────────────────────────────────────────────────────
+
+@testset "an abstract-typed callee field is :unknown, NOT :clean" begin
+    # `Holder.f::Function` can hold `unstable`. Reporting `:clean` here would be a lie, and it is
+    # exactly what the prototype did before the third value existed.
+    @test_broken ExperimentalAPI.verdict(
+        ExperimentalAPI.reach(Chain.top_field, Tuple{Chain.Holder,Float64})
+    ) === :unknown
+    @test_broken !isempty(
+        ExperimentalAPI.reach(Chain.top_field, Tuple{Chain.Holder,Float64}).unresolved
+    )
+end
+
+@testset "a run-time table lookup is :unknown, NOT :clean" begin
+    @test_broken ExperimentalAPI.verdict(
+        ExperimentalAPI.reach(Chain.top_table, Tuple{Int,Float64})
+    ) === :unknown
+    @test_broken !isempty(
+        ExperimentalAPI.reach(Chain.top_table, Tuple{Int,Float64}).unresolved
+    )
+end
+
+@testset "every unresolved site says where it is" begin
+    # "cannot tell" is only actionable if the user can go and look.
+    @test_broken all(
+        u -> hasproperty(u, :file) && hasproperty(u, :line),
+        ExperimentalAPI.reach(Chain.top_field, Tuple{Chain.Holder,Float64}).unresolved,
+    )
+end
+
+@testset "a depth limit reports :unknown rather than :clean" begin
+    @test_broken ExperimentalAPI.verdict(
+        ExperimentalAPI.reach(Chain.top_recursive, Tuple{Int,Float64}; maxdepth=1)
+    ) !== :clean
+end
+
+# ── termination ──────────────────────────────────────────────────────────────────────────────
+
+@testset "self-recursion terminates and still finds the mark" begin
+    @test_broken ExperimentalAPI.verdict(
+        ExperimentalAPI.reach(Chain.top_recursive, Tuple{Int,Float64})
+    ) === :depends
+end
+
+@testset "mutual recursion terminates" begin
+    @test_broken ExperimentalAPI.verdict(
+        ExperimentalAPI.reach(Chain.top_mutual_a, Tuple{Int,Float64})
+    ) === :depends
+end
+
+# ── things that are not calls ────────────────────────────────────────────────────────────────
+
+@testset "a marked const is seen where it is used" begin
+    # A const is not a call site, so the call-graph walk cannot find it. Either the analysis
+    # reads globals out of the IR as well, or this case has to be declared out of scope in the
+    # documentation. What it must not do is report `:clean`.
+    @test_broken ExperimentalAPI.verdict(
+        ExperimentalAPI.reach(Chain.top_uses_const, ENTRY)
+    ) !== :clean
+end
+
+@testset "a marked struct is seen at construction" begin
+    @test_broken ExperimentalAPI.verdict(
+        ExperimentalAPI.reach(Chain.top_constructs, ENTRY)
+    ) === :depends
+end
+
+@testset "marking a module marks what it contains" begin
+    # Or it does not, and that is stated. Either way it is a decision, not an omission.
+    @test_broken hasproperty(ExperimentalAPI.reach(Chain.top_bad, ENTRY), :through_modules)
+end
+
+# ── across packages ──────────────────────────────────────────────────────────────────────────
+
+@testset "a mark in a dependency propagates into the dependent" begin
+    # The QAtlas case: a downstream analysis calls `fetch`, which is marked in QAtlas.
+    # Requires the fixture package, so it is only pinned as an API shape here.
+    @test_broken ExperimentalAPI.reach isa Function
+end
+
+# ── cost ─────────────────────────────────────────────────────────────────────────────────────
+
+@testset "analysis is opt-in and costs nothing when not asked for" begin
+    # `@experimental` emits the definition unchanged plus one `push!` at load time. Whatever the
+    # analysis costs, it must not move into the marked package's own load or call path.
+    @test isempty(
+        filter(
+            m -> occursin("reach", String(m.name)), collect(methods(ExperimentalAPI._mark!))
+        ),
+    )
+end
