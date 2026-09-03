@@ -183,6 +183,14 @@ reads as if it had none:
 - **Whether a name appears in your guide, README or docs site.** Docstring presence is not
   documentation-page presence, and those two gaps are usually different sets.
 
+## Where this is going
+
+`test/spec/` is the specification for the rest: the propagation, profiling and lifecycle work is
+written there as tests before it is implemented, so it cannot drift from the code. Most of it is
+`@test_broken` today, and [`test/spec/README.md`](test/spec/README.md) explains why that register
+was chosen, which of the negative controls are actually running, and the two defects the exercise
+already found in the shipped code.
+
 ## License
 
 MIT

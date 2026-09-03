@@ -11,5 +11,18 @@ using Test
     include("test_ext.jl")
     include("test_precompile.jl")
     include("test_dogfood.jl")
+    # The case matrix. Written before the implementation, so most of it is @test_broken;
+    # see test/spec/README.md for why that is the right register.
+    include("spec/test_spec_declare.jl")
+    include("spec/test_spec_propagate.jl")
+    include("spec/test_spec_docstring.jl")
+    include("spec/test_spec_verify.jl")
+    include("spec/test_spec_profile.jl")
+    include("spec/test_spec_foreign.jl")
+    include("spec/test_spec_forms.jl")
+    include("spec/test_spec_integration.jl")
+    include("spec/test_spec_dispatch.jl")
+    include("spec/test_spec_lifecycle.jl")
+    include("test_spec_table.jl")
     include("test_aqua.jl")
 end
