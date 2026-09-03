@@ -49,14 +49,13 @@ end
 
 @testset "a marked definition is not slower than the same definition unmarked" begin
     unmarked(x::Float64) = x * 1.0000001
-    loop(f) = (
-        acc=0.0;
+    function loop(f)
+        acc = 0.0
         for _ in 1:2_000_000
-            ;
-            acc += f(1.0);
-        end;
-        acc
-    )
+            acc += f(1.0)
+        end
+        return acc
+    end
     loop(Hot.inner)
     loop(unmarked)                       # warm both before timing either
     a = @elapsed loop(Hot.inner)
