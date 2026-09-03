@@ -138,22 +138,44 @@ end
     @test Sim.driver(M, 3) ≈ 3 * (0.5 * 1.0000001 + exp(-0.5))
 end
 
-@testset "a marked definition is not slower than the same definition unmarked" begin
+@testset "a marked definition costs the same at run time as an unmarked one" begin
+    # This was a wall-clock ratio, `a < 5b + 1e-3`, and it was wrong twice over. Measured
+    # 2026-09-03, Julia 1.12.2, idle machine:
+    #
+    #   * The two arms did different work. `a` timed `Sim.energy(Sim.Model(x))` — a struct
+    #     construction per iteration — against a bare `unmarked(x)`. The 5x margin was spent on
+    #     the fixture, not on the mark, and the test failed at a = 11.8 ms, b = 2.1 ms: a real
+    #     5.6x difference that says nothing about `@experimental`.
+    #   * Making the arms identical does not rescue it. With the same body marked and unmarked,
+    #     the ratio over eight trials ran **0.79 to 3.03**. A 5x threshold sits inside that
+    #     spread on an idle machine, let alone on a shared CI runner across three OSes.
+    #
+    # So the claim is checked where it is exact instead. `@allocated` is deterministic, and the
+    # testset above pins the same property structurally, which is the stronger of the two: it
+    # catches any wrapper, whereas a wrapper that increments a counter in a preallocated
+    # `Vector{Int}` would allocate nothing and pass this one.
+    @eval module SpeedPair
+    using ExperimentalAPI
+    public marked, unmarked
+    @experimental "identical body, marked" marked(x::Float64) = x * 1.0000001
     unmarked(x::Float64) = x * 1.0000001
-    function loop(f)
+    end
+    function loop(f, xs::Vector{Float64})
         acc = 0.0
-        for _ in 1:2_000_000
-            acc += f(1.0)
+        for x in xs
+            acc += f(x)
         end
         return acc
     end
-    loop(x -> Sim.energy(Sim.Model(x)))
-    loop(unmarked)                       # warm both before timing either
-    a = @elapsed loop(x -> Sim.energy(Sim.Model(x)))
-    b = @elapsed loop(unmarked)
-    # Loose on purpose: this is a floor against wrapping, not a benchmark. A wrapper that
-    # increments a counter would not fit inside this margin.
-    @test a < 5b + 1e-3
+    xs = collect(1.0:1.0:100_000.0)
+    loop(Main.SpeedPair.marked, xs)                  # warm both before measuring either
+    loop(Main.SpeedPair.unmarked, xs)
+    @test @allocated(loop(Main.SpeedPair.marked, xs)) ==
+        @allocated(loop(Main.SpeedPair.unmarked, xs))
+    # …and that the shared figure is zero, so the equality above is not two equal wrappers.
+    @test @allocated(loop(Main.SpeedPair.unmarked, xs)) == 0
+    # The mark is still recorded — otherwise the two arms are identical because nothing happened.
+    @test :marked in [mk.name for mk in ExperimentalAPI.experimental(Main.SpeedPair)]
 end
 
 # ── mechanism constraints ────────────────────────────────────────────────────────────────────

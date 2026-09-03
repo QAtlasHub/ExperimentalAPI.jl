@@ -214,12 +214,17 @@ macro experimental(args...)
     # because the `_mark!` calls below READ that binding and Julia 1.12 forbids reading a binding
     # created in the same world age.
     marks = esc(MARKS_BINDING)
-    init = :(
-        if !$(isdefined)($__module__, $(QuoteNode(MARKS_BINDING)))
-            const $marks = $(Mark)[]
-        end
-    )
     src = __source__
+    # Built with `Expr` rather than quoted, so that no `LineNumberNode` from THIS file ends up in
+    # the expansion. `const` in local scope is a lowering error this macro cannot catch — it fires
+    # before any code it emits runs — so the only lever left is where the error points. Quoted, it
+    # named `src/mark.jl` and read as a bug in this package; the caller's own line is the line the
+    # author can act on. See `test/spec/test_spec_forms.jl`, "a mark inside a function body".
+    init = Expr(
+        :if,
+        :(!$(isdefined)($__module__, $(QuoteNode(MARKS_BINDING)))),
+        Expr(:block, src, Expr(:const, Expr(:(=), marks, :($(Mark)[])))),
+    )
     records = [
         :($(_mark!)(
             $marks,

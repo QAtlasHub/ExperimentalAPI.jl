@@ -27,21 +27,64 @@ separate fixtures. That is deliberate while the spec is the design document — 
 pinning one contract have to be kept in sync by hand, so the older files should be folded in or
 retired once the spec stops moving.
 
-Anything already implemented is a plain `@test`. The ratio of `@test` to `@test_broken` in this
-directory is the honest progress measure.
+Anything already implemented is a plain `@test`.
 
-| file | concern |
-|---|---|
-| `test_spec_declare.jl`     | what can carry a mark: function, method, struct, const, module, macro, extension |
-| `test_spec_forms.jl`       | the definition forms a real package hits on its second afternoon |
-| `test_spec_foreign.jl`     | marking a method on somebody else's generic — the `QAtlas.fetch` case |
-| `test_spec_propagate.jl`   | a caller that never names a marked thing still depends on it |
-| `test_spec_docstring.jl`   | a mark and a docstring are different accounts and must coexist |
-| `test_spec_verify.jl`      | how well is a marked thing exercised by the tests |
-| `test_spec_profile.jl`     | what a real run went through, how often, and how much of it |
-| `test_spec_dispatch.jl`    | one call site, several methods, only some marked — the branch |
-| `test_spec_lifecycle.jl`   | the mark's EXIT, and an entry point that is a module rather than a function |
-| `test_spec_integration.jl` | where the mark has to surface: docs, Aqua, releases, provenance, CI |
+## What is covered
+
+The measure is **distinct behaviours** — one per leaf `@testset` — not assertions. An assertion
+count moves without any implementation progress: `test_spec_declare.jl` has 36 assertion lines
+but 91 runtime assertions, because several run inside `for mk in experimental(Declared)`, so a
+thirteenth fixture mark would buy four more passing assertions and cover nothing new. A leaf
+testset is one claim, and adding one means writing one.
+
+*operating today* is the column that matters when reading a claim about this directory: a leaf
+that is entirely `@test_broken` is a claim written down, not a check being run.
+
+<!-- BEGIN GENERATED: julia --project=test test/spec/summary.jl -->
+| file | behaviours | operating today | specified only | concern |
+|---|---|---|---|---|
+| `test_spec_declare.jl` | 11 | 7 | 4 | what can carry a mark: function, method, struct, const, module, macro, extension |
+| `test_spec_dispatch.jl` | 14 | 4 | 10 | one call site, several methods, only some marked — the branch |
+| `test_spec_docstring.jl` | 9 | 6 | 3 | a mark and a docstring are different accounts and must coexist |
+| `test_spec_foreign.jl` | 14 | 5 | 9 | marking a method on somebody else's generic — the `QAtlas.fetch` case |
+| `test_spec_forms.jl` | 26 | 15 | 11 | the definition forms a real package hits on its second afternoon |
+| `test_spec_integration.jl` | 17 | 1 | 16 | where the mark has to surface: docs, Aqua, releases, provenance, CI |
+| `test_spec_lifecycle.jl` | 15 | 7 | 8 | the mark's EXIT, and an entry point that is a module rather than a function |
+| `test_spec_profile.jl` | 32 | 3 | 29 | what a real run went through, how often, and how much of it |
+| `test_spec_propagate.jl` | 20 | 2 | 18 | a caller that never names a marked thing still depends on it |
+| `test_spec_verify.jl` | 8 | 2 | 6 | how well is a marked thing exercised by the tests |
+| **10 files** | **166** | **52** | **114** | |
+<!-- END GENERATED -->
+
+The table is generated and pinned by `test/test_spec_table.jl`, which fails if it goes stale —
+the hand-written version drifted inside the change that introduced it.
+
+## Negative controls
+
+Each group has a negative control **specified**; most are not yet operating, because the control
+is `@test_broken` alongside the claim it controls. They are listed here as design, not as
+evidence:
+
+| group | the control | operating? |
+|---|---|---|
+| propagate   | `top_good` is *exactly as deep* as `top_bad` and must come back `:clean` | no |
+| profile     | `cold` is marked and never called, and must be **absent**, not reported with count zero | no |
+| verify      | the fixture is exercised only *partly*, so a checker that always reports 100% cannot pass | no |
+| integration | a settled name must get **no** docs note | no |
+| dispatch    | `which()` really does throw for the branching signatures the file rests on | **yes** |
+| forms       | the misuse refusals name the missing half, rather than one generic message | **yes** |
+| lifecycle   | deleting a settled name is still breaking, so `isbreaking` cannot answer `false` always | **yes** |
+
+"no" means the assertion about the *implementation* does not run, because the implementation is
+not there. It does not mean the row is unchecked: the fixture premise each control rests on is
+pinned live where it could be got wrong — `test_spec_verify.jl:38` asserts the fixture really is
+only partly exercised, and `test_spec_dispatch.jl:93` asserts the specificity relation the whole
+file assumes. A control resting on a false premise is the failure mode those guard.
+
+The one that matters most is not in the table because it is a rule rather than a fixture:
+`:unknown` must never be reported as `:clean`. Two fixtures (`Holder.f::Function`, `TABLE[i](x)`)
+really can reach the marked function while being statically invisible. Answering "no experimental
+dependency" there is not a weaker claim, it is a false one.
 
 ## What the spec already found
 
@@ -49,7 +92,14 @@ Two defects, both live in the shipped code, both of the kind the spec was writte
 a mark that silently records the wrong thing rather than refusing:
 
 1. `@experimental "…" (c::C)(x) = c.k * x` marks **`:c`**, the argument name. Not the type, not
-   a function — a local that is not a binding anywhere, so the mark is silently meaningless.
+   a function — a local that is not a binding anywhere. It produces **two** wrong signals, not
+   one: the audit reports `:c` as *dangling* (declared, no such binding) **and** `:C` as
+   *unaccounted* (public, never declared), so it tells the author to go declare the very thing
+   that line declares. Both halves have to move together; `test_spec_forms.jl` pins each.
 2. A mark inside a function body is refused by *Julia*, not by this package:
-   `syntax: unsupported const declaration on local variable`. The message never mentions
-   `@experimental` and points at a line the author did not write.
+   `syntax: unsupported const declaration on local variable`. Half fixed — the expansion now
+   carries the caller's `LineNumberNode`, so the message names the line the author wrote instead
+   of `ExperimentalAPI/src/mark.jl`, which read as a bug in the package. The message still never
+   says `@experimental`, and may not be able to: `const` in local scope fails during lowering,
+   before any emitted code runs, and the one alternative that avoids `const` (`global`) fails
+   *silently* in local scope, which is worse.

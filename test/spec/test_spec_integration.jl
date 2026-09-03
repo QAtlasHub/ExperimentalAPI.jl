@@ -3,6 +3,14 @@
 # A mark that only `ExperimentalAPI` can read is a private note. The intent — a reader of a paper,
 # a reviewer of a PR, or a user of the docs site learning that a number came from unvalidated
 # code — requires the mark to surface in tools nobody configured for it.
+#
+# This is the group with the most external dependencies named in it, so: can any of it actually
+# run in CI, or is it destined to stay broken because it cannot be otherwise? Checked before
+# writing more of it. Of the assertions below, all but one need nothing new — `docstring_note`,
+# `aqua_compatible_names`, `compare_methods`, `stale_since` and `test_surface` are pure functions
+# over data this package already holds, and `stamp` touches only a temporary file. The single
+# exception is `DocumenterExt`, which needs Documenter in the test environment; it is the one row
+# here that costs something to turn green, and it is marked as such at its testset.
 
 using ExperimentalAPI: ExperimentalAPI, @experimental, experimental
 using Test
@@ -44,6 +52,10 @@ end
 
 @testset "a Documenter block can list a module's marks" begin
     # `@autodocs`-style: one block in the manual, always current, never hand-maintained.
+    #
+    # The only assertion in this file that needs a test dependency this package does not already
+    # have (Documenter). Everything else here is pure or touches a temporary file, so this group
+    # is not blocked on infrastructure — see the note at the top.
     @test_broken ExperimentalAPI.DocumenterExt isa Module
 end
 

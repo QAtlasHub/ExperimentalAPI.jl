@@ -65,9 +65,39 @@ end
     @test !isdefined(CallableMarked, :c)                             # marks a non-binding
 end
 
+@testset "and the audit compounds it: C is reported as UNDECLARED" begin
+    # The second wrong signal, and the worse one. Because the mark landed on `:c`, the audit sees
+    # a declaration for a name that does not exist AND a public name with no declaration — so it
+    # tells the author to go declare `C`, which is the very thing the line above declares. A
+    # reader who follows that advice writes the mark a second time and still gets both signals.
+    #
+    # Recorded here so that whoever fixes `_signame` knows BOTH halves have to move together:
+    # correcting the recorded symbol without re-running the audit leaves `dangling` empty but
+    # `unaccounted` unchanged if the audit keys off something else.
+    @eval module CallablePublic
+    using ExperimentalAPI
+    public C
+    struct C
+        k::Float64
+    end
+    @experimental "scaling rule provisional" (c::C)(x) = c.k * x
+    end
+    a = ExperimentalAPI.audit(Main.CallablePublic)
+    @test :c in a.dangling          # declared, but no such binding
+    @test :C in a.unaccounted       # public, and — per the audit — never declared
+    @test Main.CallablePublic.C(2.0)(3.0) == 6.0   # the definition itself is fine; the mark is not
+end
+
 @testset "a callable struct marks the type, or refuses" begin
     # Either answer is defensible. Marking the argument name is not.
     @test_broken :C in [mk.name for mk in experimental(Main.CallableMarked)]
+end
+
+@testset "…and fixing that clears BOTH signals" begin
+    # The paired assertion for the testset above. `_signame` returning `:C` is necessary but not
+    # sufficient: the audit is what the author actually reads, and it has to go quiet too.
+    a = ExperimentalAPI.audit(Main.CallablePublic)
+    @test_broken isempty(a.dangling) && :C ∉ a.unaccounted
 end
 
 @testset "a constructor method is marked on the type" begin
@@ -161,29 +191,57 @@ end
 end
 
 @testset "a mark inside a function body is refused" begin
-    # It IS refused today, but by Julia rather than by this package: the emitted `const` is
-    # illegal in local scope, so the message is
-    #   syntax: unsupported `const` declaration on local variable
-    # which says nothing about `@experimental` and points at a line the author did not write.
+    # It IS refused by Julia rather than by this package: `const` in local scope is a LOWERING
+    # error, which fires before any code this macro emits can run, so there is no point at which
+    # a check of ours could intercept it. The one lever left is where the error points, and it
+    # used to point at `ExperimentalAPI/src/mark.jl` — reading as a bug in the package rather
+    # than a misuse of it, whose natural next step is to file an issue here. The expansion now
+    # carries the CALLER's `LineNumberNode`, so the message names the line the author wrote.
+    #
+    # The misuse has to arrive from a FILE. Measured 2026-09-03: the same misuse written through
+    # `@eval` or `Core.eval` — which is how every other refusal in this file is probed — produces
+    # `"syntax: unsupported `const` declaration on local variable"` with NO location at all, so a
+    # location assertion made that way is vacuous and would pass just as well against the old
+    # expansion. The source is built line by line so the formatter cannot shift line 4.
+    dir = mktempdir()
+    path = joinpath(dir, "caller_side.jl")
+    write(
+        path,
+        join(
+            [
+                "module CallerSide",
+                "using ExperimentalAPI",
+                "function outer()",
+                "    @experimental \"why\" inner(x) = x",
+                "    return inner",
+                "end",
+                "end",
+            ],
+            "\n",
+        ),
+    )
     e = try
-        @eval module ClosureMarked
-        using ExperimentalAPI
-        function outer()
-            @experimental "why" inner(x) = x
-            return inner
-        end
-        end
+        include(path)
         nothing
     catch err
-        err
+        err isa LoadError ? err.error : err
     end
     @test e isa ErrorException
-    @test occursin("unsupported `const` declaration", sprint(showerror, e))
+    msg = sprint(showerror, e)
+    @test occursin("unsupported `const` declaration", msg)
+    # The half that is fixed: the blame lands on the line the author actually wrote…
+    @test occursin("caller_side.jl:4", msg)
+    # …and nowhere in this package. Checked against the FILE NAME: the repository path contains
+    # the string "ExperimentalAPI", so a negative assertion on that word passes by accident.
+    @test !occursin("mark.jl", msg)
 end
 
 @testset "the refusal names @experimental rather than leaking the emitted const" begin
-    # A macro whose diagnostic is about its own expansion has handed the reader a puzzle. The
-    # message should say that a mark belongs at module top level, next to `export` and `public`.
+    # The half that is NOT fixed. The message now points at the right line, but it still talks
+    # about a `const` the author never wrote; it should say that a mark belongs at module top
+    # level, next to `export` and `public`. Whether that is reachable at all is open — the error
+    # comes from lowering, so this may only be answerable by not emitting `const`, and the
+    # alternative (`global`) fails SILENTLY in local scope, which is strictly worse.
     e = try
         @eval module ClosureMarked2
         using ExperimentalAPI
