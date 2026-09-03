@@ -50,10 +50,10 @@ that is entirely `@test_broken` is a claim written down, not a check being run.
 | `test_spec_forms.jl` | 26 | 15 | 11 | the definition forms a real package hits on its second afternoon |
 | `test_spec_integration.jl` | 17 | 1 | 16 | where the mark has to surface: docs, Aqua, releases, provenance, CI |
 | `test_spec_lifecycle.jl` | 15 | 7 | 8 | the mark's EXIT, and an entry point that is a module rather than a function |
-| `test_spec_profile.jl` | 40 | 5 | 35 | what a real run went through, how often, and how much of it |
+| `test_spec_profile.jl` | 40 | 12 | 28 | what a real run went through, how often, and how much of it |
 | `test_spec_propagate.jl` | 20 | 2 | 18 | a caller that never names a marked thing still depends on it |
 | `test_spec_verify.jl` | 8 | 2 | 6 | how well is a marked thing exercised by the tests |
-| **10 files** | **174** | **54** | **120** | |
+| **10 files** | **174** | **61** | **113** | |
 <!-- END GENERATED -->
 
 The table is generated and pinned by `test/test_spec_table.jl`, which fails if it goes stale —

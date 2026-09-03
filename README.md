@@ -6,39 +6,71 @@
 [![Code Style: Blue](https://img.shields.io/badge/Code%20Style-Blue-4495d1.svg)](https://github.com/invenia/BlueStyle)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-`public` says who may call a name. Nothing says whether the name is finished.
+`public` says who may call a name. Nothing says whether the name is *finished* — and nothing tells
+you, after a twelve-hour run, that the number you are about to publish came out of code its author
+had not validated.
 
-Julia already checks half of that. `Docs.undocumented_names` has been public API in Base since
-1.11, and `Aqua.test_undocumented_names` ships it as a test: every public name must carry a
-docstring. What neither can express is the **third option** —
-
-> this name is public, it has no docstring, and that is deliberate: the shape is not settled,
-> and here is why.
-
-ExperimentalAPI adds that option at the definition site, and makes it something a tool reads
-rather than prose a human might happen to notice.
+`@experimental` is that mark, written at the definition site where the author is, and readable by
+a machine so the answer arrives without anyone remembering to ask for it.
 
 ```julia
 using ExperimentalAPI
 
-@experimental "reads Test's internal result tree; not dogfooded in CI yet" \
-function render_test_report(records)
-    # ...
-end
+@experimental "convergence not established below β ≈ 0.1" energy(β) = β * 1.0000001
+
+energy(0.5)
 ```
+
+Run that file and it ends by telling you something you did not ask for:
+
+```console
+$ julia sweep.jl
+┌ ExperimentalAPI: this run entered 1 experimental definition
+│   Main.energy — convergence not established below β ≈ 0.1
+└ set ENV["EXPERIMENTALAPI_SUMMARY"] = "0" before `using` to silence this
+```
+
+It is on by default, it carries the **reason** rather than just the symbol, and a marked
+definition the run never entered is *absent* — not reported with a count of zero. The same answer
+is available programmatically:
 
 ```julia
-julia> ExperimentalAPI.audit(MyPackage)
-Public surface of MyPackage — 46 names
-  documented      45
-  experimental     1
-  unaccounted      0
+julia> ExperimentalAPI.entered()
+1-element Vector{ExperimentalAPI.Entry}:
+ Entry(Main.energy, "convergence not established below β ≈ 0.1")
 ```
 
-The mark costs nothing at run time: `@experimental` emits your definition unchanged plus one
-`push!` at load time. Calls are not wrapped.
+That example is executed verbatim by `test/test_readme.jl`, so it cannot rot.
 
-## The check is the point
+## What it costs
+
+A read, plus one write on the first call:
+
+| emitted into the body | 1 thread | 8 threads |
+|---|---|---|
+| nothing | 1.00× | 1.00× |
+| **the flag `@experimental` emits** | 1.03× | **0.985×** |
+| a counter, plain shared `Ref` | 1.03× | 3.76× — and loses 40% of its increments to races |
+| a counter, global atomic | 1.17× | 4.87× |
+| `@warn`, guarded so it fires once | 5.65× | — |
+
+10M calls of `sqrt(abs(sin(x)cos(x) + exp(-|x|/1e6)))`, minimum of 7–9 trials, Julia 1.12.2. The
+flag is written once and only read afterwards, so it stops dirtying the cache line — which is why
+it is free at eight threads while every counting scheme is not, and why the notice is a summary at
+exit rather than a warning at the call. Counting, call sites and paths are a separate, opt-in
+layer that is not built yet.
+
+Only a definition **with a body** carries a flag — `function`, `f(x) = …`, parametric and
+return-type-annotated signatures alike. A mark written as a name list, or attached to a struct, a
+const or a module, is a declaration: queryable, and part of the audit below, but nothing observes
+it at run time. One flag per marked *name*, so two methods of a marked name share it.
+
+## It is also a check
+
+Julia already checks half of the surface question: `Docs.undocumented_names` has been public API
+in Base since 1.11, and `Aqua.test_undocumented_names` ships it as a test — every public name must
+carry a docstring. What neither can express is the third answer: *this name is public, it has no
+docstring, and that is deliberate, and here is why*.
 
 A marker nobody compares against anything is a claim. Put this in `runtests.jl` and it becomes a
 contract:
@@ -169,7 +201,7 @@ public, which is the module contradicting itself and needs no reference to be wr
 | type stability | DispatchDoctor | unrelated |
 | every public name has a docstring | `Docs.undocumented_names` (Base 1.11+), `Aqua.test_undocumented_names` | the same check, plus a third answer |
 | generating documentation | Documenter | only ever checks whether prose exists |
-| run-time behaviour | — | calls are untouched |
+| run-time behaviour | — | one short-circuit read in the body; see the table above |
 
 ## What the audit cannot see
 

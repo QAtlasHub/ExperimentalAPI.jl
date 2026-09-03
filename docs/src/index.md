@@ -4,46 +4,63 @@ CurrentModule = ExperimentalAPI
 
 # ExperimentalAPI.jl
 
-`public` says who may call a name. Nothing says whether the name is finished.
+`public` says who may call a name. Nothing says whether the name is *finished* — and nothing tells
+you, after a twelve-hour run, that the number you are about to publish came out of code its author
+had not validated.
 
-Julia already checks half of that. `Docs.undocumented_names` has been public API in Base since
-1.11, and `Aqua.test_undocumented_names` ships it as a test: every public name must carry a
-docstring. What neither can express is the **third option** —
-
-!!! note ""
-    this name is public, it has no docstring, and that is deliberate: the shape is not settled,
-    and here is why.
-
-ExperimentalAPI adds that option at the definition site, and makes it something a tool reads
-rather than prose a human might happen to notice.
+`@experimental` is that mark, written at the definition site where the author is, and readable by
+a machine so the answer arrives without anyone remembering to ask for it.
 
 ```julia
 using ExperimentalAPI
 
-@experimental "reads Test's internal result tree; not dogfooded in CI yet" \
-function render_test_report(records)
-    # ...
-end
+@experimental "convergence not established below β ≈ 0.1" energy(m::Model) = m.β * correction(m)
 ```
 
-```julia
-julia> ExperimentalAPI.audit(MyPackage)
-Public surface of MyPackage — 46 names
-  documented      45
-  experimental     1
-  unaccounted      0
+```console
+$ julia sweep.jl
+… your output …
+┌ ExperimentalAPI: this run entered 1 experimental definition
+│   MyModel.energy — convergence not established below β ≈ 0.1
+└ set ENV["EXPERIMENTALAPI_SUMMARY"] = "0" before `using` to silence this
 ```
 
-## Three things, and only the third is a reason to have this
+Nobody asked for that summary. It is on by default, it carries the **reason** rather than just the
+symbol, and a marked definition the run never entered is *absent* — not reported with a count of
+zero. The same answer is available programmatically through [`entered`](@ref).
+
+## Three things, and the first is the reason to have this
 
 | | |
 |---|---|
+| an **observation** | which marked definitions the run went through — [`entered`](@ref), and the summary at exit |
 | a **declaration** | the reason travels with the name, in the source, where the author is — [`@experimental`](@ref) |
-| a **query** | a tool asks the module instead of reading prose — [`experimental`](@ref), [`stable`](@ref) |
 | a **check** | every public name is accounted for, or the test fails — [`audit`](@ref), [`test_surface`](@ref) |
 
-A marker nobody compares against anything is a claim. A marker something compares against the
-public surface is a contract. Everything in the first two rows exists to make the third possible.
+A docstring can carry the second row. Nothing a human writes can carry the first: the question is
+not "is this name experimental" but "did *this run* go through one", and it has to be answered
+after the run, about the run.
+
+## What it costs
+
+One short-circuit read in the body, and a write on the first call:
+
+| emitted into the body | 1 thread | 8 threads |
+|---|---|---|
+| nothing | 1.00× | 1.00× |
+| **the flag `@experimental` emits** | 1.03× | **0.985×** |
+| a counter, plain shared `Ref` | 1.03× | 3.76× — and loses 40% of its increments to races |
+| a counter, global atomic | 1.17× | 4.87× |
+| `@warn`, guarded so it fires once | 5.65× | — |
+
+10M calls of `sqrt(abs(sin(x)cos(x) + exp(-|x|/1e6)))`, minimum of 7–9 trials, Julia 1.12.2. The
+flag is written once and only read afterwards, so it stops dirtying the cache line — which is why
+it is free at eight threads while every counting scheme is not, and why the notice is a summary at
+exit rather than a warning at the call.
+
+Only a definition **with a body** carries a flag; see [`@experimental`](@ref) for the
+form-by-form table. Counting, call sites and paths are a separate, opt-in layer that is not built
+yet.
 
 ## Why this is a separate axis
 
@@ -80,10 +97,11 @@ was never made public, which is the module contradicting itself.
 | type stability | DispatchDoctor | unrelated |
 | every public name has a docstring | `Docs.undocumented_names`, `Aqua.test_undocumented_names` | the same check, plus a third answer |
 | generating documentation | Documenter | only ever checks whether prose exists |
-| run-time behaviour | — | calls are untouched |
+| run-time behaviour | — | one short-circuit read in the body — see the table above |
+| how often a path ran | `Profile`, `@time` | not answered: the default layer knows *whether*, never how often |
 
-`@experimental` emits your definition unchanged plus one `push!` at load time. It does not wrap
-the call, does not add a method, and does not change dispatch.
+`@experimental` adds one statement to the body and nothing else. It does not add a method, does
+not change dispatch, and never allocates or logs.
 
 ## Install
 

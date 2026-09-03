@@ -1,37 +1,45 @@
 """
     ExperimentalAPI
 
-Say, at the definition site, that a public name is **not settled yet** — and turn that into a
-check something runs.
+Say, at the definition site, that a name is **not settled yet** — and find out, without asking,
+when a run went through it.
 
-Visibility is already a language feature: `export` and `public` decide who is *allowed* to call a
-name. Stability is the orthogonal question — whether the name is *finished* — and today the only
-place to answer it is a sentence in a docstring that no tool reads and no CI job verifies.
+`public` decides who may call a name. Whether the name is *finished* is the orthogonal question,
+and the place it is usually answered is a sentence in a docstring that no tool reads. That matters
+most where it is least visible: a long numerical run finishes, hands back a number, and nothing in
+the result says which of the code paths behind it had never been validated.
 
 ```julia
 using ExperimentalAPI
 
-@experimental "reads Test's internal result tree; not dogfooded in CI yet" \
-function render_test_report(records)
-    # ...
-end
+@experimental "convergence not established below β ≈ 0.1" energy(m::Model) = m.β * correction(m)
 ```
 
-That mark is three things at once, and only the third is the reason to have it:
+The mark is three things, and the first is the reason to have it:
 
+  * an **observation** — [`entered`](@ref) reports the marked definitions this run actually went
+    through, and a summary says so at process exit whether or not anyone asked;
   * a **declaration** — the reason travels with the name, in the source, where the author is;
-  * a **query** — [`experimental`](@ref) hands a tool the list, [`stable`](@ref) hands it the
-    complement;
-  * a **check** — [`audit`](@ref) reports every public name that is *neither* documented *nor*
+  * a **check** — [`audit`](@ref) reports every public name that is neither documented nor
     declared, so "document it or admit it is unfinished" becomes a test that fails.
 
-The check is the point. A marker that is only ever written is a claim; a marker something
-compares against the public surface is a contract.
+# What it costs
+
+One short-circuit read in the body, and a write on the first call only: measured at 1.03x on one
+thread and 0.985x on eight, for 10M calls of a numeric body. A flag written once and read
+thereafter stops dirtying the cache line, which a counter (3.76x at eight threads, and losing 40%
+of its increments to races unless atomic) does not. Counting, call sites and paths are a separate
+layer that is not built yet.
+
+Only a definition **with a body** carries a flag. A mark written as a name list, or attached to a
+struct, a const or a module, is a declaration — queryable, audited, but not observed at run time.
+See [`@experimental`](@ref) for the form-by-form table.
 
 # The three questions this answers
 
 | question | the call |
 |---|---|
+| did this run go through unvalidated code? | `entered()` — and the summary at exit says so anyway |
 | what is unfinished here? | `experimental(M)` |
 | what does this module owe nobody an explanation for? | `audit(M).unaccounted` — should be empty |
 | is dropping this name breaking? | `compare(old_snapshot, M)` — see [`isbreaking`](@ref) |
@@ -42,8 +50,8 @@ compares against the public surface is a contract.
     public and experimental, or public and settled; those are independent axes.
   * **Not deprecation.** `@deprecate` points the other way — a settled name on its way out.
   * **Not type stability.** Unrelated axis, different tooling.
-  * **Not a runtime wrapper.** `@experimental` emits the definition unchanged plus one `push!` at
-    load time. Calls are untouched.
+  * **Not instrumentation.** The body gains one short-circuit read, nothing more: no counter, no
+    logging call, no allocation. What it can answer is "was this entered at all", never how often.
   * **Not a documentation generator.** The prose belongs to the author; this only ever checks
     whether prose exists.
 
@@ -62,11 +70,13 @@ export @experimental
 
 public Mark, Audit, Diff
 public experimental, isexperimental, mark, isdocumented
+public Entry, entered, marked_modules, detecting, summary_text
 public surface, stable, audit
 public snapshot, read_snapshot, write_snapshot, compare, isbreaking
 public test_surface
 
 include("mark.jl")      # the Mark record, the per-module registry, and @experimental
+include("detect.jl")    # which marked definitions a run entered, and the summary at exit
 include("query.jl")     # reading a module's marks back out
 include("audit.jl")     # the public surface, and the names neither account covers
 include("release.jl")   # a snapshot of the covenant, and what a diff of two of them means
@@ -94,5 +104,12 @@ Returns the [`Audit`](@ref) on the normal return path whether the testset passed
 `outputlevel ≥ 1` also prints it.
 """
 function test_surface end
+
+# Armed at load time rather than on first mark: the hook has to be in place before any of the
+# marked package's code runs, and `atexit` is the only place a summary can see a whole run.
+function __init__()
+    detecting() && atexit(_summarise)
+    return nothing
+end
 
 end # module
