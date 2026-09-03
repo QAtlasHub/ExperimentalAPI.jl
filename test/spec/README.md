@@ -50,14 +50,50 @@ that is entirely `@test_broken` is a claim written down, not a check being run.
 | `test_spec_forms.jl` | 26 | 15 | 11 | the definition forms a real package hits on its second afternoon |
 | `test_spec_integration.jl` | 17 | 1 | 16 | where the mark has to surface: docs, Aqua, releases, provenance, CI |
 | `test_spec_lifecycle.jl` | 15 | 7 | 8 | the mark's EXIT, and an entry point that is a module rather than a function |
-| `test_spec_profile.jl` | 31 | 2 | 29 | what a real run went through, how often, and how much of it |
+| `test_spec_profile.jl` | 40 | 5 | 35 | what a real run went through, how often, and how much of it |
 | `test_spec_propagate.jl` | 20 | 2 | 18 | a caller that never names a marked thing still depends on it |
 | `test_spec_verify.jl` | 8 | 2 | 6 | how well is a marked thing exercised by the tests |
-| **10 files** | **165** | **51** | **114** | |
+| **10 files** | **174** | **54** | **120** | |
 <!-- END GENERATED -->
 
 The table is generated and pinned by `test/test_spec_table.jl`, which fails if it goes stale —
 the hand-written version drifted inside the change that introduced it.
+
+## Two layers, and why the split is where it is
+
+The goal is a tool that says **where** experimental code was used, and a user who learns they
+used it **without opting in**. Those are different jobs with different budgets, and the boundary
+between them was measured rather than chosen. 10M calls of a realistic numeric body, Julia
+1.12.2, minimum of 7–9 trials:
+
+| emitted into the body | 1 thread | 8 threads | counts correctly? |
+|---|---|---|---|
+| nothing | 1.00× | 1.00× | — |
+| set-once flag, read-mostly | 1.03× | **0.985×** | yes |
+| counter, plain shared `Ref` | 1.03× | 3.76× | **no** |
+| counter, global atomic | 1.17× | 4.87× | yes |
+| counter, per-thread atomic | 1.12× | 2.79× | yes |
+| `@warn`, guarded so it fires once | 5.65× | — | yes |
+| `@warn maxlog=1` | 59.57× | — | yes |
+
+Two results decided it. The plain counter is not merely slow in parallel — it recorded
+95,406,048 of 160,000,000 calls, **losing 40% to races**, so it is wrong as well as expensive.
+And a flag written once and only read afterwards never dirties the cache line again, which is
+why it is free at eight threads while every counting scheme is not.
+
+So **presence is detected by default and costs nothing; counts, call sites and paths are
+opt-in.** The `@warn` rows are why the default notice is a summary at process exit rather than a
+warning at first entry: the cost is the logging call sitting in the body, not the warning being
+printed, and guarding it so that it fires once does not recover it.
+
+### One requirement was withdrawn
+
+This directory used to require that `@experimental` **never wrap the call**, and
+`test_spec_profile.jl` pinned it structurally. That is gone: presence cannot be detected without
+emitting something into the body. What replaced it is narrower and measured — the emitted
+statement must be read-mostly, must add exactly one statement, and must not bring the logging
+machinery with it. The last of those is checked today, with a macro that *does* log as the
+positive control.
 
 ## Negative controls
 
