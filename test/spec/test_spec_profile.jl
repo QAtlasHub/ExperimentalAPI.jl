@@ -49,19 +49,19 @@ const M = Sim.Model(0.5)
 
 @testset "a run reports what it entered without being asked to record" begin
     Sim.driver(M, 10)
-    @test_broken :energy in [h.name for h in ExperimentalAPI.entered()]
+    @test :energy in [h.name for h in ExperimentalAPI.entered()]
 end
 
 @testset "the default answer is presence, and does not pretend to be counts" begin
     # Scope: "at least once". A count field here would read as a measurement it did not make.
     Sim.driver(M, 10)
-    @test_broken ExperimentalAPI.entered()[1].count === nothing
+    @test ExperimentalAPI.entered()[1].count === nothing
 end
 
 @testset "a definition that was never entered is absent from the default answer too" begin
     # Control: separates observed from enumerated.
     Sim.driver(M, 10)
-    @test_broken :cold ∉ [h.name for h in ExperimentalAPI.entered()]
+    @test :cold ∉ [h.name for h in ExperimentalAPI.entered()]
 end
 
 # Observed from a child process: an `atexit` handler registered in this one would pass for a
@@ -117,7 +117,7 @@ end
 end # module ChildRun
 
 @testset "the summary is printed at process exit" begin
-    @test_broken occursin("energy", ChildRun.output(ChildRun.ENTERS))
+    @test occursin("energy", ChildRun.output(ChildRun.ENTERS))
 end
 
 @testset "a process that loaded a mark but never entered it stays silent" begin
@@ -126,12 +126,14 @@ end
 end
 
 @testset "the summary carries the reason, not just the name" begin
-    @test_broken occursin("convergence not established", ExperimentalAPI.summary_text())
+    @test occursin("convergence not established", ExperimentalAPI.summary_text())
 end
 
 @testset "the default layer can be turned off" begin
-    # Scope: readable before `using` returns, so an environment variable rather than a call.
-    @test_broken ExperimentalAPI.detecting() === true
+    # Scope: read before `using` returns, so an environment variable rather than a call — the
+    # `atexit` hook is registered at load time.
+    @test ExperimentalAPI.detecting() === true
+    @test withenv(ExperimentalAPI.detecting, "EXPERIMENTALAPI_SUMMARY" => "0") === false
 end
 
 # ── the opt-in layer: the basic question ─────────────────────────────────────────────────────
@@ -243,18 +245,22 @@ end
 
 end # module WrapControl
 
-@testset "today the expansion is untouched — which is what has to change" begin
-    # Scope: the default layer needs one statement in the body, so this equality must break.
+@testset "the expansion adds exactly one statement, and it is a short-circuit read" begin
+    # Scope: what the default layer may put in a body. One statement, and a read that writes only
+    # on the first call — an unconditional store costs 3.76x at eight threads.
     # Compared at the AST: the expansion carries `Expr(:escape, …)` and prints differently.
     bare = WrapControl.method_bodies(@macroexpand f(x) = x * 2)
     marked = WrapControl.method_bodies(@macroexpand @experimental "why" f(x) = x * 2)
     @test length(bare) == 1
-    @test marked == bare
+    @test length(marked[1].args) == length(bare[1].args) + 1
+    @test marked[1].args[1].head === :||
+    # Control: `@wrapping` adds one statement too, and it is a store. Without this, `head === :||`
+    # is the only thing separating the two and nothing checks that it can be otherwise.
     wrapped = WrapControl.method_bodies(
         @macroexpand WrapControl.@wrapping "why" f(x) = x * 2
     )
-    @test wrapped != bare
-    @test_broken length(marked[1].args) == length(bare[1].args) + 1
+    @test length(wrapped[1].args) == length(bare[1].args) + 1
+    @test wrapped[1].args[1].head !== :||
     @test Sim.driver(M, 3) ≈ 3 * (0.5 * 1.0000001 + exp(-0.5))
 end
 
@@ -281,7 +287,7 @@ end
 end
 
 @testset "detection is on by default; counting is not" begin
-    @test_broken ExperimentalAPI.detecting() === true
+    @test ExperimentalAPI.detecting() === true
     @test_broken ExperimentalAPI.recording() === false
 end
 

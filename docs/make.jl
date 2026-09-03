@@ -16,6 +16,7 @@ makedocs(;
     pages=[
         "Home" => "index.md",
         "Declaring" => "declaring.md",
+        "Observing" => "observing.md",
         "Checking" => "checking.md",
         "Release decisions" => "releases.md",
         "Adopting it" => "adopting.md",
