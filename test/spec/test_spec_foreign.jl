@@ -60,9 +60,7 @@ end
 end
 
 @testset "a method on a foreign generic can be marked" begin
-    # Ends in a Bool, and checks WHAT was marked: `@eval module … end` returns a Module, so a bare
-    # `@test_broken @eval module …` reports "Expression evaluated to non-Boolean" on success
-    # instead of the "Unexpected Pass" this directory relies on.
+    # Ends in a Bool and checks WHAT was marked — same caveat as `spec/README.md`.
     @test_broken begin
         @eval module MarkedForeign
         using ExperimentalAPI
@@ -99,6 +97,14 @@ end
     @test_broken !isempty(ExperimentalAPI.experimental_methods(Downstream)) && all(
         mk -> mk.mod === Downstream, ExperimentalAPI.experimental_methods(Downstream)
     )
+end
+
+@testset "the ownership query and the cross-module search are different verbs" begin
+    # `experimental(Module)` answers "what does this module own". `experimental(fetch_value)` has
+    # to answer "what has any package anywhere marked on any method of this generic". Both are
+    # wanted, but collapsing them onto one name means a reader cannot tell which they get without
+    # knowing the argument's type.
+    @test_broken ExperimentalAPI.marks_on isa Function
 end
 
 @testset "asking the generic finds marks contributed by every package" begin

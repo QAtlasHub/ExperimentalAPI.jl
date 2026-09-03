@@ -235,6 +235,20 @@ end
     @test_broken ExperimentalAPI.audit(FormsSpec).tracking isa AbstractDict
 end
 
+# Evaluate an expression in a fresh module and hand back the exception it raised, unwrapped.
+# The `Module(...)` + `Core.eval` + `LoadError`-stripping plumbing was written out five times
+# before this; it carries none of the claim, so it is a helper rather than part of each test.
+function probe(ex)
+    m = Module()
+    Core.eval(m, :(using ExperimentalAPI))
+    try
+        Core.eval(m, ex)
+        return nothing
+    catch err
+        return err isa LoadError ? err.error : err
+    end
+end
+
 # ── writing it lazily ────────────────────────────────────────────────────────────────────────
 #
 # The reason is the payload: why a name is not settled is knowledge only the author has. So the
@@ -242,23 +256,26 @@ end
 # without one". Measured 2026-09-03: every lazy form IS refused — but two of them are refused by
 # accident, and two more are refused with a message pointing the wrong way.
 
-@testset "a bare @experimental is refused" begin
-    for ex in (
-        :(@experimental),
-        :(@experimental foo),
-        :(@experimental function f(x)
+@testset "a bare @experimental is refused, and says which of the two is missing" begin
+    # `@test_throws Exception` for all six would be satisfied by one generic
+    # `ArgumentError("@experimental: invalid usage")`. The section exists to check that the
+    # message points the right way, so each case pins the phrase it should carry.
+    for (ex, needle) in (
+        (:(@experimental), "needs a reason"),
+        (:(@experimental foo), "the reason comes first"),
+        (:(@experimental function f(x)
             x
-        end),
-        :(@experimental struct S
+        end), "the reason comes first"),
+        (:(@experimental struct S
             v::Int
-        end),
-        :(@experimental f(x) = x),
-        :(@experimental const C = 1),
+        end), "the reason comes first"),
+        (:(@experimental f(x) = x), "nothing to mark"),
+        (:(@experimental const C = 1), "nothing to mark"),
     )
-        @testset "$(first(string(ex), 40))" begin
-            m = Module(:LazyProbe)
-            Core.eval(m, :(using ExperimentalAPI))
-            @test_throws Exception Core.eval(m, ex)
+        @testset "$(first(string(ex), 36))" begin
+            e = probe(ex)
+            @test e isa ArgumentError
+            @test occursin(needle, sprint(showerror, e))
         end
     end
 end
@@ -287,14 +304,7 @@ end
     # Same shape as the `since = "0.4.0"` case above.
     for r in (:(:sym), 42)
         @testset "reason=$(repr(r))" begin
-            m = Module(:BadReasonProbe)
-            Core.eval(m, :(using ExperimentalAPI))
-            e = try
-                Core.eval(m, :(@experimental $r f(x) = x))
-                nothing
-            catch err
-                err isa LoadError ? err.error : err
-            end
+            e = probe(:(@experimental $r f(x) = x))
             @test e isa MethodError                       # today, and accidental
             @test_broken occursin("reason", sprint(showerror, e))
         end
@@ -305,14 +315,7 @@ end
     # `@experimental f(x) = x` is refused with "nothing to mark — give a definition or a name".
     # The author DID give a definition; what is missing is the reason. The message points at the
     # wrong end of the call, which is how someone ends up deleting a correct definition.
-    m = Module(:NoReasonProbe)
-    Core.eval(m, :(using ExperimentalAPI))
-    e = try
-        Core.eval(m, :(@experimental f(x) = x))
-        nothing
-    catch err
-        err isa LoadError ? err.error : err
-    end
+    e = probe(:(@experimental f(x) = x))
     @test e isa ArgumentError
     @test occursin("nothing to mark", sprint(showerror, e))        # today, and misleading
     @test_broken occursin("reason", sprint(showerror, e))

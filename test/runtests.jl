@@ -17,7 +17,6 @@ using Test
     include("spec/test_spec_propagate.jl")
     include("spec/test_spec_docstring.jl")
     include("spec/test_spec_verify.jl")
-    include("spec/test_spec_runtime.jl")
     include("spec/test_spec_profile.jl")
     include("spec/test_spec_foreign.jl")
     include("spec/test_spec_forms.jl")

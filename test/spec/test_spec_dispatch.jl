@@ -10,7 +10,7 @@
 # An implementation that catches that exception and moves on would report `:clean` about a call
 # that reaches a marked method at run time half the time. That is the failure this file guards.
 
-using ExperimentalAPI: ExperimentalAPI, @experimental, experimental, isexperimental
+using ExperimentalAPI: ExperimentalAPI, @experimental, experimental, isexperimental, mark
 using Test
 
 module Dispatch
@@ -28,7 +28,10 @@ public Exact,
     either_way,
     via_abstract,
     via_invoke,
-    more_specific
+    more_specific,
+    pair,
+    via_pair_clean,
+    via_pair_marked
 
 struct Exact end
 struct Numerical end
@@ -51,8 +54,21 @@ only_settled(x::Exact) = energy(x)
 either_way(x::Union{Exact,Numerical}) = energy(x)
 via_abstract(x::Kind) = k(x)
 
-# `invoke` pins a method regardless of the argument's run-time type.
-via_invoke(x::Numerical) = invoke(energy, Tuple{Numerical}, x)
+# `invoke` pins a method DISPATCH WOULD NOT PICK. `invoke(energy, Tuple{Numerical}, x)` would
+# not discriminate: `x::Numerical` selects the marked method anyway, so an analysis that ignores
+# `invoke` entirely still gets the right answer by accident. Forcing the marked `::Integer`
+# fallback from an `Int` — which ordinary dispatch sends to the unmarked `::Int` — does.
+via_invoke(x::Int) = invoke(more_specific, Tuple{Integer}, x)
+
+# Two arguments, which is the shape the motivating example actually has: `fetch(model, quantity)`.
+# Specificity differs per position, so the marked combination is not reachable from either
+# argument alone.
+pair(::Exact, ::Exact) = 0.0
+pair(::Exact, ::Numerical) = 1.0
+@experimental "only this combination is unvalidated" pair(::Numerical, ::Numerical) = 2.0
+pair(::Numerical, ::Exact) = 3.0
+via_pair_clean(a::Exact, b::Exact) = pair(a, b)
+via_pair_marked(a::Numerical, b::Numerical) = pair(a, b)
 
 # A more specific unmarked method shadows a marked less specific one.
 "Settled, and more specific."
@@ -74,13 +90,47 @@ end # module Dispatch
     @test isexperimental(Dispatch, :energy)
 end
 
+@testset "the specificity premise the file rests on is true" begin
+    # Stated only in a comment until now, and exercised solely inside `@test_broken` blocks gated
+    # behind a `reach` that does not exist — so nothing would have noticed if it were false.
+    @test which(Dispatch.more_specific, Tuple{Int}).sig ===
+        Tuple{typeof(Dispatch.more_specific),Int}
+    @test Dispatch.more_specific(5) == 0            # the UNMARKED, more specific method
+    @test Dispatch.more_specific(UInt8(5)) == 1     # falls through to the MARKED fallback
+    @test Dispatch.via_invoke(5) == 1               # invoke reaches what dispatch would not pick
+end
+
 @testset "a branching call site has no unique method" begin
     # The measured fact the whole file rests on: `which` cannot answer for these argument types.
+    # `@test_throws Exception` would be satisfied by a typo in the fixture raising `UndefVarError`
+    # just as well as by the ambiguity this file is about, so pin the diagnosis, not the failure.
     @test which(Dispatch.energy, Tuple{Dispatch.Exact}) isa Method
-    @test_throws Exception which(
-        Dispatch.energy, Tuple{Union{Dispatch.Exact,Dispatch.Numerical}}
+    for (f, T) in (
+        (Dispatch.energy, Tuple{Union{Dispatch.Exact,Dispatch.Numerical}}),
+        (Dispatch.k, Tuple{Dispatch.Kind}),
     )
-    @test_throws Exception which(Dispatch.k, Tuple{Dispatch.Kind})
+        @testset "$T" begin
+            e = try
+                which(f, T)
+                nothing
+            catch err
+                err
+            end
+            @test e isa ErrorException
+            @test occursin("ambiguous", sprint(showerror, e))
+        end
+    end
+end
+
+@testset "attaching the mark at one method's definition marks the NAME today" begin
+    # Line 38 above reads as if it scopes the claim to `energy(::Numerical)`. It does not:
+    # `_signame` walks a `:call` head straight to the base Symbol and throws the argument types
+    # away. So method-level marking cannot come from the attached form as written — it has to
+    # arrive through a separate imperative route (`mark_method!`), and that is a design decision
+    # the spec should state rather than leave implied.
+    @test isexperimental(Dispatch, :energy)
+    @test mark(Dispatch, :energy).name === :energy         # not a signature
+    @test_broken ExperimentalAPI.mark_method! isa Function
 end
 
 # ── what the analysis has to say about each shape ────────────────────────────────────────────
@@ -111,8 +161,15 @@ end
 
 @testset "the unresolvable call site is named, not just counted" begin
     # "Somewhere in here I could not tell" is not actionable. The report has to point at the call.
+    # NOT `occursin("k", string(u))`: a one-character needle matches "unknown call site",
+    # "package boundary" and "backtrace unavailable" alike, so one generic boilerplate diagnostic
+    # would satisfy it. Ask for the structured fields, the way `test_spec_propagate.jl` does.
+    @test_broken all(
+        u -> hasproperty(u, :file) && hasproperty(u, :line) && hasproperty(u, :callee),
+        ExperimentalAPI.reach(Dispatch.via_abstract, Tuple{Dispatch.Kind}).unresolved,
+    )
     @test_broken any(
-        u -> occursin("k", string(u)),
+        u -> u.callee === :k,
         ExperimentalAPI.reach(Dispatch.via_abstract, Tuple{Dispatch.Kind}).unresolved,
     )
 end
@@ -159,6 +216,20 @@ end
             Dispatch.either_way, Tuple{Union{Dispatch.Exact,Dispatch.Numerical}}
         ),
     )
+end
+
+@testset "a marked combination is not reachable from either argument alone" begin
+    # `pair(::Exact,::Exact)` and `pair(::Numerical,::Exact)` are settled; only
+    # `pair(::Numerical,::Numerical)` is marked. An analysis that widens each argument
+    # independently would call both call sites `:depends`.
+    @test_broken ExperimentalAPI.verdict(
+        ExperimentalAPI.reach(Dispatch.via_pair_clean, Tuple{Dispatch.Exact,Dispatch.Exact})
+    ) === :clean
+    @test_broken ExperimentalAPI.verdict(
+        ExperimentalAPI.reach(
+            Dispatch.via_pair_marked, Tuple{Dispatch.Numerical,Dispatch.Numerical}
+        ),
+    ) === :depends
 end
 
 @testset "the report says WHICH method was reached, not which name" begin

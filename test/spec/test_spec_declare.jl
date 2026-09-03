@@ -1,14 +1,13 @@
 # What can carry a mark.
 #
 # The current implementation marks a NAME. The intent is to mark a definition — and for
-# `QAtlas.fetch`, which has 570 methods (measured 2026-09-03, not re-derived here) behind one name, the name is the wrong unit: a docstring
+# `QAtlas.fetch`, which has 570 methods behind one name (see `test_spec_foreign.jl`), the name is the wrong unit: a docstring
 # on `fetch` cannot say which dispatch path returns a number you can trust.
 #
 # So this file covers both: what works today (plain `@test`) and what the unit has to become
 # (`@test_broken`).
 
-using ExperimentalAPI:
-    ExperimentalAPI, @experimental, Mark, experimental, isexperimental, mark
+using ExperimentalAPI: ExperimentalAPI, @experimental, Mark, experimental, isexperimental
 using Test
 
 module Declared
@@ -168,6 +167,18 @@ end
     @test_broken any(
         mk -> mk.mod === ext, ExperimentalAPI.experimental(ExperimentalAPI; extensions=true)
     )
+end
+
+@testset "every new Audit field keeps the partition invariant" begin
+    # Three files each pin a new `Audit` field with `hasproperty` alone — `:extensions` here,
+    # `:undocumented` in the docstring spec, `:contributed_methods` in the foreign spec — written
+    # without cross-referencing each other. `hasproperty` is blind to whether the property the
+    # type exists for still holds once three fields are bolted on from three directions.
+    a = ExperimentalAPI.audit(ExperimentalAPI)
+    @test sort(
+        vcat(a.foreign, a.documented, a.unaccounted, setdiff(a.declared, a.documented))
+    ) == a.surface
+    @test_broken ExperimentalAPI.partition_holds(a) === true
 end
 
 @testset "auditing a package does not silently ignore its extensions" begin

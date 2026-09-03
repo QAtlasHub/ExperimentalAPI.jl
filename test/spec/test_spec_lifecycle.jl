@@ -23,7 +23,7 @@ module Lifecycle
 
 using ExperimentalAPI
 
-public verified_now, still_unverified, settled, consumer, entry
+public verified_now, still_unverified, tracked_but_unresolved, settled, consumer, entry
 
 # A mark whose reason has been discharged: the reference value now exists and the test suite
 # exercises it. This is the one that should be removable.
@@ -39,6 +39,18 @@ public verified_now, still_unverified, settled, consumer, entry
     "convergence not established below β ≈ 0.1",
     since = v"0.1.0",
     still_unverified(β::Float64) = β * 1.0000001
+)
+
+# A third mark, and the reason it is here: without it, `verified_now` and `still_unverified`
+# differ ONLY in whether `tracking` is set, so `ready_to_promote(m, n) = mark(m,n).tracking !==
+# nothing` — a rule with no relationship at all to "has the reason been discharged" — satisfies
+# both assertions below. This one HAS a tracking link and is still not ready, which breaks that
+# shortcut. The fixture has to vary on the axis under test, not on a neighbouring one.
+@experimental(
+    "reference value exists but disagrees with the literature at the third digit",
+    since = v"0.1.0",
+    tracking = "https://example.invalid/issues/2",
+    tracked_but_unresolved(β::Float64) = β + 1e-9
 )
 
 "Settled from the start."
@@ -75,6 +87,10 @@ end
     # "Something in here is experimental" is not actionable for a package with 310 public names.
     @test_broken :entry in
         [e.name for e in ExperimentalAPI.reach(Lifecycle).affected_entries]
+    # …and `settled` reaches nothing marked, so it must NOT be listed. Without this, a walk that
+    # reports every public name whenever the module contains any mark at all passes.
+    @test_broken :settled ∉
+        [e.name for e in ExperimentalAPI.reach(Lifecycle).affected_entries]
 end
 
 @testset "a module with nothing marked comes back clean" begin
@@ -89,7 +105,15 @@ end
 
 @testset "a script can be the entry point" begin
     # The shape a researcher actually has: not a package, a file that produces a figure.
-    @test_broken ExperimentalAPI.reach_script(tempname()) isa Any
+    #
+    # Two traps avoided here. `tempname()` returns a path and creates NO file, so reading it
+    # throws `SystemError` forever regardless of the implementation — the same defect fixed one
+    # commit earlier for `stamp`. And `isa Any` is true of every Julia value, so it would have
+    # reported Unexpected Pass for a no-op returning `nothing`.
+    path = tempname()
+    write(path, "1 + 1\n")
+    @test isfile(path)
+    @test_broken hasproperty(ExperimentalAPI.reach_script(path), :reached)
 end
 
 # ── the exit: what licenses removing a mark ──────────────────────────────────────────────────
@@ -101,10 +125,21 @@ end
 end
 
 @testset "a mark whose reason still stands is NOT reported ready" begin
-    # Without this, a checker that says "ready" for everything passes the test above. Both
+    # Without this, a checker that says "ready" for everything passes the test above. All three
     # definitions in the fixture are exercised by this suite, so coverage cannot be the whole
     # criterion — which is the point.
     @test_broken ExperimentalAPI.ready_to_promote(Lifecycle, :still_unverified) === false
+end
+
+@testset "having a tracking link is not the same as being ready" begin
+    # `tracked_but_unresolved` carries a tracking link and is still not ready. Without this,
+    # `ready_to_promote(m, n) = mark(m, n).tracking !== nothing` — which has nothing to do with
+    # the criteria the comments name — satisfies both testsets above.
+    @test mark(Lifecycle, :tracked_but_unresolved).tracking !== nothing
+    @test mark(Lifecycle, :verified_now).tracking !== nothing
+    @test mark(Lifecycle, :still_unverified).tracking === nothing
+    @test_broken ExperimentalAPI.ready_to_promote(Lifecycle, :tracked_but_unresolved) ===
+        false
 end
 
 @testset "removing a mark is reported as not breaking" begin
@@ -152,18 +187,35 @@ end
     # `since` is recorded and nothing reads it. "Experimental" that never expires is just a label,
     # and the letter's framing — an intermediate goal — needs the clock to be visible.
     @test mark(Lifecycle, :still_unverified).since == v"0.1.0"
-    @test_broken ExperimentalAPI.age(Lifecycle, :still_unverified, v"0.9.0") isa Any
+    # Not `isa Any` — that is true of every value, including `nothing` from a stub. Assert the
+    # number the caller actually needs: eight minor releases have passed since v0.1.0.
+    @test_broken ExperimentalAPI.age(Lifecycle, :still_unverified, v"0.9.0") == 8
 end
 
 @testset "the number of marks can only go down under a ratchet" begin
     # The mechanism that makes "an intermediate goal" real rather than aspirational, and the same
     # shape as `test_surface`'s skip list, which already only shrinks.
-    @test_broken ExperimentalAPI.test_surface(Lifecycle; max_marks=1) isa
-        ExperimentalAPI.Audit
+    #
+    # `isa Audit` will NOT do: `test_surface` is documented to return the audit on the normal
+    # return path whether the testset passed or not, so an implementation that accepts
+    # `max_marks` and ignores it satisfies that. Assert what the cap actually does.
+    @test length(experimental(Lifecycle)) == 3
+    @test_broken ExperimentalAPI.exceeds_mark_cap(Lifecycle, 1) === true
+    @test_broken ExperimentalAPI.exceeds_mark_cap(Lifecycle, 5) === false
 end
 
 @testset "a mark removed while callers still depend on it is caught" begin
     # The failure mode of removing one carelessly: the line is deleted because the author looked
     # at the definition, not at who reaches it. That is what propagation is for, read backwards.
-    @test_broken !isempty(ExperimentalAPI.dependents(Lifecycle, :verified_now))
+    @test_broken :consumer in ExperimentalAPI.dependents(Lifecycle, :verified_now)
+    # `settled` calls nothing marked, so it is nobody's dependent. Without this, a `dependents`
+    # that returns every public name passes.
+    @test_broken :settled ∉ ExperimentalAPI.dependents(Lifecycle, :verified_now)
+end
+
+@testset "the exit works at method granularity too" begin
+    # `test_spec_dispatch.jl` argues that a name-keyed mark over-claims when a name has several
+    # methods. The exit has the same problem read backwards: promoting one method of a name must
+    # not promote its siblings. Neither file tests the intersection, so it is stated here.
+    @test_broken ExperimentalAPI.ready_to_promote isa Function
 end

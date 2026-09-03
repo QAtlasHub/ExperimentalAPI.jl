@@ -4,7 +4,7 @@
 # a reviewer of a PR, or a user of the docs site learning that a number came from unvalidated
 # code — requires the mark to surface in tools nobody configured for it.
 
-using ExperimentalAPI: ExperimentalAPI, @experimental, audit, experimental
+using ExperimentalAPI: ExperimentalAPI, @experimental, experimental
 using Test
 
 module Shown
@@ -61,31 +61,46 @@ end
 end
 
 # ── release ──────────────────────────────────────────────────────────────────────────────────
+#
+# One schema for every case below, mirroring `snapshot`'s `"stable"` / `"experimental"` pair. An
+# earlier version used `"methods"` in the first testset and `"stable_methods"` in the other two,
+# so "same shape, opposite verdict" was false: the fixtures differed in more than the variable
+# each one isolates, and no test ever supplied both keys at once.
+function snap(stable, experimental)
+    return Dict("stable_methods" => stable, "experimental_methods" => experimental)
+end
+
+const MARKED_METHOD = snap(String[], Dict("f(::Int)" => Dict("reason" => "r")))
+const PROMOTED_METHOD = snap(["f(::Int)"], Dict())
+const SETTLED_METHOD = snap(["f(::Int)"], Dict())
+const GONE_METHOD = snap(String[], Dict())
+const RESIGNED_METHOD = snap(["f(::Real)"], Dict())
+
+@testset "the method snapshot mirrors the name snapshot's two keys" begin
+    # If the two schemas diverge, `compare` and `compare_methods` cannot share a snapshot file.
+    for d in (MARKED_METHOD, PROMOTED_METHOD, SETTLED_METHOD, GONE_METHOD, RESIGNED_METHOD)
+        @test Set(keys(d)) == Set(["stable_methods", "experimental_methods"])
+    end
+    @test Set(keys(ExperimentalAPI.snapshot(Shown))) ⊇ Set(["stable", "experimental"])
+end
 
 @testset "a snapshot records marks at method granularity" begin
     # `compare` reads name sets today and says so. Once methods can be marked, the snapshot has
     # to grow — and the schema change is why the release layer is itself declared experimental.
-    @test_broken haskey(ExperimentalAPI.snapshot(Shown), "methods")
+    @test_broken haskey(ExperimentalAPI.snapshot(Shown), "experimental_methods")
 end
 
 @testset "removing a marked METHOD is not breaking" begin
     # The same contract as for names, at the granularity that matters for a dispatch table.
-    # These two testsets used to share a byte-identical `compare_methods isa Function`, so both
-    # would flip the instant the function existed, with neither behavioural claim ever checked.
     @test_broken !ExperimentalAPI.isbreaking(
-        ExperimentalAPI.compare_methods(
-            Dict("methods" => Dict("f(::Int)" => Dict("reason" => "r"))),
-            Dict("methods" => Dict()),
-        ),
+        ExperimentalAPI.compare_methods(MARKED_METHOD, PROMOTED_METHOD)
     )
 end
 
 @testset "removing a SETTLED method is breaking" begin
-    # The negative control for the testset above: same shape, unmarked method, opposite verdict.
+    # The negative control: the same schema, differing only in whether the method was marked.
     @test_broken ExperimentalAPI.isbreaking(
-        ExperimentalAPI.compare_methods(
-            Dict("stable_methods" => ["f(::Int)"]), Dict("stable_methods" => String[])
-        ),
+        ExperimentalAPI.compare_methods(SETTLED_METHOD, GONE_METHOD)
     )
 end
 
@@ -93,10 +108,15 @@ end
     # The blind spot `compare` currently admits to in its own docstring. Method-level marks are
     # what make it addressable at all.
     @test_broken ExperimentalAPI.isbreaking(
-        ExperimentalAPI.compare_methods(
-            Dict("stable_methods" => ["f(::Int)"]), Dict("stable_methods" => ["f(::Real)"])
-        ),
+        ExperimentalAPI.compare_methods(SETTLED_METHOD, RESIGNED_METHOD)
     )
+end
+
+@testset "a keyword-only change is a blind spot here too" begin
+    # `Tuple`-based signatures have no room for keyword arguments — they live in a separate
+    # `kwcall` method — so a change to a default or a kwarg name is invisible to a signature
+    # string just as it is to a name set. Stated rather than discovered later.
+    @test_broken ExperimentalAPI.compare_methods_sees_keywords === true
 end
 
 # ── the provenance record next to a result ───────────────────────────────────────────────────

@@ -81,7 +81,7 @@ end
 # ── granularity ──────────────────────────────────────────────────────────────────────────────
 
 @testset "attribution is to a method, not to a name" begin
-    # `QAtlas.fetch` has 570 methods (measured 2026-09-03, not re-derived here). "the run touched fetch" is unusable.
+    # `QAtlas.fetch` has 570 methods — see `test_spec_foreign.jl`. "the run touched fetch" is unusable.
     @test_broken first(ExperimentalAPI.record(() -> Sim.driver(M, 10))).method isa Method
 end
 
@@ -119,6 +119,41 @@ end
     @test_broken let h = first(ExperimentalAPI.record(() -> Sim.driver(M, 1000)))
         h.inclusive >= h.exclusive
     end
+end
+
+# ── the floor: the mark must not wrap the call ───────────────────────────────────────────────
+#
+# Folded in from what used to be `test_spec_runtime.jl`. Its other eight testsets restated this
+# file's claims on a strictly smaller fixture; only these two measured anything of their own.
+
+@testset "the mark does not wrap the call" begin
+    # The property the package currently advertises and must keep: `@experimental` emits the
+    # definition unchanged plus one `push!` at load time. If instrumentation ever becomes
+    # unconditional, an inner loop pays for it on every iteration.
+    # Reading `src/mark.jl` for a prose phrase would pass for a regression that wrapped the call
+    # and left the sentence alone. Look at what the macro emits.
+    emitted = string(@macroexpand @experimental "why" f(x) = x)
+    @test occursin("f(x)", emitted)                # the definition is there…
+    @test !occursin("function f", replace(emitted, "f(x)" => ""))   # …and not wrapped in another
+    @test Sim.driver(M, 3) ≈ 3 * (0.5 * 1.0000001 + exp(-0.5))
+end
+
+@testset "a marked definition is not slower than the same definition unmarked" begin
+    unmarked(x::Float64) = x * 1.0000001
+    function loop(f)
+        acc = 0.0
+        for _ in 1:2_000_000
+            acc += f(1.0)
+        end
+        return acc
+    end
+    loop(x -> Sim.energy(Sim.Model(x)))
+    loop(unmarked)                       # warm both before timing either
+    a = @elapsed loop(x -> Sim.energy(Sim.Model(x)))
+    b = @elapsed loop(unmarked)
+    # Loose on purpose: this is a floor against wrapping, not a benchmark. A wrapper that
+    # increments a counter would not fit inside this margin.
+    @test a < 5b + 1e-3
 end
 
 # ── mechanism constraints ────────────────────────────────────────────────────────────────────
@@ -175,6 +210,16 @@ end
         Sim.driver(M, 100)
     end
     @test_broken ExperimentalAPI.record(threaded)[1].count == 800
+end
+
+@testset "a merged record is still a record" begin
+    # `merge_records(...) isa AbstractVector` is the only constraint today, so a `record()` you
+    # can ask `.overhead` of, merged with another, may legally come back as a plain `Vector` you
+    # cannot. Losing the type across a verb's own merge is avoidable.
+    @test_broken hasproperty(
+        ExperimentalAPI.merge_records([ExperimentalAPI.record(() -> Sim.driver(M, 10))]),
+        :enabled,
+    )
 end
 
 @testset "records from separate processes merge into one" begin

@@ -35,6 +35,18 @@ struct Mark
     tracking::Union{String,Nothing}
     file::Symbol
     line::Int
+
+    # The reason is the payload, so "it may not be empty" belongs in the type rather than in one
+    # code path. Without this the check lived only in `_reason`, which only the macro calls —
+    # `Mark(Main, :x, "", nothing, nothing, :f, 1)` built an empty-reason mark quite happily, and
+    # `Mark` is `public`. Every future construction route (a method-level `mark_method!`, a
+    # deserialised snapshot) gets the invariant for free now instead of remembering to ask.
+    function Mark(mod, name, reason, since, tracking, file, line)
+        r = String(strip(reason))
+        isempty(r) &&
+            throw(ArgumentError("a Mark's reason may not be empty — it is the payload"))
+        return new(mod, name, r, since, tracking, file, line)
+    end
 end
 
 function Base.show(io::IO, m::Mark)

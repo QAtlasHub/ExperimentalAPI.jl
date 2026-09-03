@@ -38,7 +38,6 @@ directory is the honest progress measure.
 | `test_spec_propagate.jl`   | a caller that never names a marked thing still depends on it |
 | `test_spec_docstring.jl`   | a mark and a docstring are different accounts and must coexist |
 | `test_spec_verify.jl`      | how well is a marked thing exercised by the tests |
-| `test_spec_runtime.jl`     | the floor: the mark must not wrap the call |
 | `test_spec_profile.jl`     | what a real run went through, how often, and how much of it |
 | `test_spec_dispatch.jl`    | one call site, several methods, only some marked — the branch |
 | `test_spec_lifecycle.jl`   | the mark's EXIT, and an entry point that is a module rather than a function |

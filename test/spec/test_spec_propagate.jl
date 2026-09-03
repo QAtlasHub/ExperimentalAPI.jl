@@ -117,6 +117,47 @@ const ENTRY = Tuple{Float64}
     @test :solid ∉ names          # the negative control really is unmarked
 end
 
+# ── the type the answer lives in ─────────────────────────────────────────────────────────────
+#
+# `Mark` and `Audit` are both pinned nominally somewhere in this directory (`isa Mark`,
+# `isa Audit`). The propagation result is not: before these tests it was pinned purely by field
+# name, so a `NamedTuple` with `.reached`/`.unresolved` satisfied every assertion in four files
+# and `verdict` could be duck-typed on `hasproperty`.
+
+@testset "the result has a type, not just field names" begin
+    @test_broken ExperimentalAPI.reach(Chain.top_bad, ENTRY) isa ExperimentalAPI.Reach
+end
+
+@testset "verdict is derived, never stored" begin
+    # `isbreaking(d::Diff)` is a pure function over `d.removed_stable`/`d.demoted`, never a cached
+    # field — which is why a `Diff` cannot claim "not breaking" while carrying a removal. Same
+    # rule here: if `verdict` were a stored field, `:clean` with a non-empty `.unresolved` would
+    # become representable, and that is the one state this whole file exists to forbid.
+    @test_broken !hasproperty(ExperimentalAPI.reach(Chain.top_bad, ENTRY), :verdict)
+end
+
+@testset "a boolean gate exists alongside the three-valued answer" begin
+    # Every existing verdict in this package is a named predicate — `isbreaking`,
+    # `isexperimental`, `isdocumented` — never a comparison the caller writes out. The spec
+    # hand-writes `verdict(...) === :clean` and friends 26 times, which is the smell.
+    @test_broken ExperimentalAPI.isclean(ExperimentalAPI.reach(Chain.top_good, ENTRY)) ===
+        true
+    @test_broken ExperimentalAPI.isclean(ExperimentalAPI.reach(Chain.top_bad, ENTRY)) ===
+        false
+end
+
+@testset ":unknown absorbs when results are combined" begin
+    # `reach(Module)` has to fold the verdicts of every public entry into one answer, so the
+    # algebra has to exist. It is stated here rather than discovered: a module with one
+    # `:unknown` entry is not clean, whatever the others say, and folding is order-independent.
+    @test_broken ExperimentalAPI.combine(:clean, :unknown) === :unknown
+    @test_broken ExperimentalAPI.combine(:depends, :unknown) === :depends
+    @test_broken ExperimentalAPI.combine(:clean, :depends) === :depends
+    @test_broken ExperimentalAPI.combine(:clean, :clean) === :clean
+    @test_broken ExperimentalAPI.combine(:unknown, :clean) ===
+        ExperimentalAPI.combine(:clean, :unknown)
+end
+
 # ── the core claim ───────────────────────────────────────────────────────────────────────────
 
 @testset "a caller two hops away is reported as depending" begin

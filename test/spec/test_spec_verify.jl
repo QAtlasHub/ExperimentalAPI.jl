@@ -8,7 +8,7 @@
 # comes back and looks fine. A marked method with zero coverage is the worst case: unverified
 # code, shipped, and never even run by its own suite.
 
-using ExperimentalAPI: ExperimentalAPI, @experimental, experimental, mark
+using ExperimentalAPI: ExperimentalAPI, @experimental, experimental
 using Test
 
 module Covered
