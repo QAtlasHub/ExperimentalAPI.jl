@@ -1,9 +1,8 @@
-# The definition forms the macro has not been shown to handle.
+# The definition forms a real package hits on its second afternoon: kwargs, parametric
+# signatures, callable structs, constructors, operators, stacked macros.
 #
-# `test_spec_declare.jl` covers the forms that work today. These are the ones a real package hits
-# on its second afternoon: keyword arguments, parametric signatures, callable structs,
-# constructors, operators, stacked macros. Each one either works, or the refusal has to name the
-# alternative — silently marking the wrong symbol is the outcome this file exists to prevent.
+# Scope: each form either works, or the refusal names the alternative. Silently marking the wrong
+# symbol is the outcome this file exists to prevent.
 
 using ExperimentalAPI: ExperimentalAPI, @experimental, experimental, isexperimental, mark
 using Test
@@ -51,9 +50,8 @@ end
 # ── forms that are not covered ───────────────────────────────────────────────────────────────
 
 @testset "a callable struct is marked on the WRONG symbol today" begin
-    # Measured 2026-09-03. `(c::C)(x) = c.k * x` has no function name, and `_signame` walks the
-    # `::` and returns the ARGUMENT name. The mark lands on `:c`, a local that is not a binding
-    # anywhere, so it is silently meaningless — the exact failure this file exists to catch.
+    # `(c::C)(x)` has no function name; `_signame` walks the `::` and returns the argument name.
+    # The mark lands on `:c`, which is not a binding anywhere.
     @eval module CallableMarked
     using ExperimentalAPI
     struct C
@@ -66,14 +64,9 @@ end
 end
 
 @testset "and the audit compounds it: C is reported as UNDECLARED" begin
-    # The second wrong signal, and the worse one. Because the mark landed on `:c`, the audit sees
-    # a declaration for a name that does not exist AND a public name with no declaration — so it
-    # tells the author to go declare `C`, which is the very thing the line above declares. A
-    # reader who follows that advice writes the mark a second time and still gets both signals.
-    #
-    # Recorded here so that whoever fixes `_signame` knows BOTH halves have to move together:
-    # correcting the recorded symbol without re-running the audit leaves `dangling` empty but
-    # `unaccounted` unchanged if the audit keys off something else.
+    # The second wrong signal: the audit reports a declaration for a name that does not exist AND
+    # a public name with no declaration, so it tells the author to declare what that line already
+    # declares. Both halves have to move together.
     @eval module CallablePublic
     using ExperimentalAPI
     public C
@@ -89,19 +82,19 @@ end
 end
 
 @testset "a callable struct marks the type, or refuses" begin
-    # Either answer is defensible. Marking the argument name is not.
+    # Either answer is defensible; the argument name is not.
     @test_broken :C in [mk.name for mk in experimental(Main.CallableMarked)]
 end
 
 @testset "…and fixing that clears BOTH signals" begin
-    # The paired assertion for the testset above. `_signame` returning `:C` is necessary but not
-    # sufficient: the audit is what the author actually reads, and it has to go quiet too.
+    # `_signame` returning `:C` is necessary but not sufficient — the audit is what the author
+    # reads.
     a = ExperimentalAPI.audit(Main.CallablePublic)
     @test_broken isempty(a.dangling) && :C ∉ a.unaccounted
 end
 
 @testset "a constructor method is marked on the type" begin
-    # This one already resolves correctly: the mark lands on `:T`.
+    # Already correct: the mark lands on `:T`.
     @eval module CtorMarked
     using ExperimentalAPI
     struct T
@@ -111,23 +104,19 @@ end
     end
     got = Set(mk.name for mk in experimental(Main.CtorMarked))
     @test :T in got
-    # …and the ARGUMENT name is not also marked. The sibling testset above found exactly that
-    # defect for `(c::C)(x)`; an over-inclusive walk would reintroduce it here unnoticed.
+    # Control: an over-inclusive walk would mark the argument name here too.
     @test :s ∉ got
 end
 
 @testset "an inner constructor inside a marked struct is not separately marked" begin
-    # Marking the struct should not silently also claim its inner constructors are unfinished,
-    # nor silently exclude them. Whichever it is has to be stated.
+    # Included or excluded is a decision; silence is not.
     @test_broken hasproperty(mark(FormsSpec, :Callable), :includes_constructors)
 end
 
 @testset "an operator method can be marked" begin
-    # `@eval module … end` evaluates to a Module, never a Bool, so wrapping it directly in
-    # `@test_broken` reports "Expression evaluated to non-Boolean" on success rather than the
-    # "Unexpected Pass" this directory relies on. Each of these now ends in a Bool AND checks
-    # WHAT was marked — accepting the syntax while recording the wrong symbol is the defect this
-    # file already caught once, for `(c::C)(x)`.
+    # Each ends in a Bool and checks what was marked: `@eval module` returns a Module, which
+    # reports "non-Boolean" instead of the Unexpected Pass this directory relies on, and accepting
+    # the syntax while recording the wrong symbol is the defect above.
     @test_broken begin
         @eval module OpMarked
         using ExperimentalAPI
@@ -151,8 +140,8 @@ end
 end
 
 @testset "Base.@kwdef stacks with the mark" begin
-    # `@kwdef` expands to a block carrying `Expr(:meta, :doc)`. Two macros that both wrap a
-    # definition must compose in at least one order, and the order that works must be documented.
+    # Two macros that both wrap a definition must compose in at least one order, and which one
+    # must be documented.
     @test_broken begin
         @eval module KwdefMarked
         using ExperimentalAPI
@@ -176,8 +165,7 @@ end
 end
 
 @testset "a definition produced by @eval can be marked by name" begin
-    # Metaprogrammed definitions cannot be attached to; the name-list form is the answer and it
-    # has to be reachable.
+    # Metaprogrammed definitions cannot be attached to, so the name-list form must reach them.
     @test_broken begin
         @eval module EvalMarked
         using ExperimentalAPI
@@ -191,18 +179,13 @@ end
 end
 
 @testset "a mark inside a function body is refused" begin
-    # It IS refused by Julia rather than by this package: `const` in local scope is a LOWERING
-    # error, which fires before any code this macro emits can run, so there is no point at which
-    # a check of ours could intercept it. The one lever left is where the error points, and it
-    # used to point at `ExperimentalAPI/src/mark.jl` — reading as a bug in the package rather
-    # than a misuse of it, whose natural next step is to file an issue here. The expansion now
-    # carries the CALLER's `LineNumberNode`, so the message names the line the author wrote.
+    # Refused by Julia, not by this package: `const` in local scope fails during lowering, before
+    # any emitted code runs, so no check of ours can intercept it. The one lever is where the
+    # error points, and the expansion carries the caller's `LineNumberNode`.
     #
-    # The misuse has to arrive from a FILE. Measured 2026-09-03: the same misuse written through
-    # `@eval` or `Core.eval` — which is how every other refusal in this file is probed — produces
-    # `"syntax: unsupported `const` declaration on local variable"` with NO location at all, so a
-    # location assertion made that way is vacuous and would pass just as well against the old
-    # expansion. The source is built line by line so the formatter cannot shift line 4.
+    # The misuse must arrive from a FILE: written through `@eval` the message carries no location
+    # at all, so a location assertion made that way is vacuous. Built line by line so the
+    # formatter cannot shift line 4.
     dir = mktempdir()
     path = joinpath(dir, "caller_side.jl")
     write(
@@ -229,19 +212,16 @@ end
     @test e isa ErrorException
     msg = sprint(showerror, e)
     @test occursin("unsupported `const` declaration", msg)
-    # The half that is fixed: the blame lands on the line the author actually wrote…
+    # The blame lands on the line the author wrote…
     @test occursin("caller_side.jl:4", msg)
-    # …and nowhere in this package. Checked against the FILE NAME: the repository path contains
-    # the string "ExperimentalAPI", so a negative assertion on that word passes by accident.
+    # …and nowhere in this package. Checked by file name: the repository path contains
+    # "ExperimentalAPI", so asserting on that word passes by accident.
     @test !occursin("mark.jl", msg)
 end
 
 @testset "the refusal names @experimental rather than leaking the emitted const" begin
-    # The half that is NOT fixed. The message now points at the right line, but it still talks
-    # about a `const` the author never wrote; it should say that a mark belongs at module top
-    # level, next to `export` and `public`. Whether that is reachable at all is open — the error
-    # comes from lowering, so this may only be answerable by not emitting `const`, and the
-    # alternative (`global`) fails SILENTLY in local scope, which is strictly worse.
+    # The message still names a `const` the author never wrote. Whether this is reachable is
+    # open: the only expansion avoiding `const` is `global`, which fails silently in local scope.
     e = try
         @eval module ClosureMarked2
         using ExperimentalAPI
@@ -260,11 +240,8 @@ end
 # ── metadata ─────────────────────────────────────────────────────────────────────────────────
 
 @testset "since must be a version, and the refusal must say so" begin
-    # It IS refused today, but by accident: `Mark.since::Union{VersionNumber,Nothing}` cannot
-    # convert a String, so the error is
-    #   MethodError: Cannot `convert` an object of type String to an object of type VersionNumber
-    # which names neither `since` nor `@experimental`. A deliberate check would keep throwing, so
-    # asserting "it throws" could never signal that the fix had landed — assert the DIAGNOSTIC.
+    # Refused by accident: the field's conversion fails, with a message naming neither `since`
+    # nor `@experimental`. A deliberate check would also throw, so assert the diagnostic.
     e = try
         @eval module BadSince
         using ExperimentalAPI
@@ -279,8 +256,7 @@ end
 end
 
 @testset "an unknown keyword is refused rather than ignored" begin
-    # `@experimental("why", trackign = "u", f(x) = x)` — a typo in a keyword name must not
-    # silently become part of the subject.
+    # A typo in a keyword name must not silently become part of the subject.
     @test_throws LoadError @eval module BadKw
     using ExperimentalAPI
     @experimental("why", trackign = "u", f(x) = x)
@@ -288,14 +264,11 @@ end
 end
 
 @testset "tracking is carried through to every report" begin
-    # The field that turns a warning into something a reader can act on. It is stored today; it
-    # has to survive into the audit and the record as well.
+    # Stored today; it has to survive into the audit and the record as well.
     @test_broken ExperimentalAPI.audit(FormsSpec).tracking isa AbstractDict
 end
 
 # Evaluate an expression in a fresh module and hand back the exception it raised, unwrapped.
-# The `Module(...)` + `Core.eval` + `LoadError`-stripping plumbing was written out five times
-# before this; it carries none of the claim, so it is a helper rather than part of each test.
 function probe(ex)
     m = Module()
     Core.eval(m, :(using ExperimentalAPI))
@@ -309,15 +282,12 @@ end
 
 # ── writing it lazily ────────────────────────────────────────────────────────────────────────
 #
-# The reason is the payload: why a name is not settled is knowledge only the author has. So the
-# interesting question is not "does the good form work" but "what happens when someone writes it
-# without one". Measured 2026-09-03: every lazy form IS refused — but two of them are refused by
-# accident, and two more are refused with a message pointing the wrong way.
+# Scope: what happens when the reason — the payload, and knowledge only the author has — is left
+# out. Every lazy form is refused; two by accident, and two with a message pointing the wrong way.
 
 @testset "a bare @experimental is refused, and says which of the two is missing" begin
-    # `@test_throws Exception` for all six would be satisfied by one generic
-    # `ArgumentError("@experimental: invalid usage")`. The section exists to check that the
-    # message points the right way, so each case pins the phrase it should carry.
+    # Each case pins its own phrase: `@test_throws Exception` for all six would be satisfied by
+    # one generic message.
     for (ex, needle) in (
         (:(@experimental), "needs a reason"),
         (:(@experimental foo), "the reason comes first"),
@@ -356,10 +326,8 @@ end
 end
 
 @testset "a non-string reason is refused by accident, not by a check" begin
-    # `@experimental :sym f(x) = x` and `@experimental 42 f(x) = x` both die inside `_reason`
-    # with `MethodError: no method matching strip(::Symbol)` / `strip(::Int64)`. Refused, yes —
-    # but by `strip` failing, with a message that names neither `@experimental` nor `reason`.
-    # Same shape as the `since = "0.4.0"` case above.
+    # Refused by `strip` failing inside `_reason`, with a message naming neither `@experimental`
+    # nor `reason`. Same shape as the `since` case above.
     for r in (:(:sym), 42)
         @testset "reason=$(repr(r))" begin
             e = probe(:(@experimental $r f(x) = x))
@@ -370,9 +338,8 @@ end
 end
 
 @testset "forgetting the reason is diagnosed as a missing reason" begin
-    # `@experimental f(x) = x` is refused with "nothing to mark — give a definition or a name".
-    # The author DID give a definition; what is missing is the reason. The message points at the
-    # wrong end of the call, which is how someone ends up deleting a correct definition.
+    # The message says "nothing to mark" when a definition was given and the reason was not —
+    # pointing at the end of the call the author should not touch.
     e = probe(:(@experimental f(x) = x))
     @test e isa ArgumentError
     @test occursin("nothing to mark", sprint(showerror, e))        # today, and misleading
@@ -380,8 +347,7 @@ end
 end
 
 @testset "nothing is marked when the macro refuses" begin
-    # A refusal that still recorded a mark would be worse than either outcome. Checks the module
-    # is left clean, not just that an exception came out.
+    # Checks the module is left clean, not just that an exception came out.
     m = Module(:RefusedProbe)
     Core.eval(m, :(using ExperimentalAPI))
     try
@@ -422,7 +388,6 @@ end
 end
 
 @testset "the replacement is reported rather than silent" begin
-    # Two different reasons for one name usually means two authors disagreed, or a stale mark was
-    # left behind. Last-write-wins is a decision, and it should be visible.
+    # Last-write-wins is a decision, and it should be visible.
     @test_broken ExperimentalAPI.superseded_marks isa Function
 end

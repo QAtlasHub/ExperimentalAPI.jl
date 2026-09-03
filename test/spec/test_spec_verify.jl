@@ -1,12 +1,7 @@
-# "How well is this experimental thing actually verified?"
+# How well a marked definition is exercised by the tests.
 #
-# This is the half of the intent that is cheap. A mark carries `file` and `line`; Julia's
-# `--code-coverage` writes per-line execution counts. Joining them answers, with no new
-# machinery: which marked definitions does the test suite never execute?
-#
-# It matters because the failure mode being guarded against is not a crash. It is a number that
-# comes back and looks fine. A marked method with zero coverage is the worst case: unverified
-# code, shipped, and never even run by its own suite.
+# Scope: joining the mark's `file`/`line` against `--code-coverage` counts. No new machinery, and
+# it answers the worst case — unverified code that its own suite never runs.
 
 using ExperimentalAPI: ExperimentalAPI, @experimental, experimental
 using Test
@@ -33,8 +28,8 @@ end
 
 end # module Covered
 
-# The suite that "verifies" the module. Deliberately partial — a fixture that exercised
-# everything could not tell a working coverage join from one that always reports 100%.
+# Deliberately partial: a fully exercised fixture cannot tell a working join from one that
+# always reports 100%.
 @testset "the fixture is exercised only partly, on purpose" begin
     @test Covered.exercised(1) == 2
     @test Covered.half_exercised(1) == 1
@@ -46,7 +41,7 @@ end
     for mk in experimental(Covered)
         @test isfile(String(mk.file))
         @test mk.line > 0
-        # The recorded line is the declaration, and the definition starts at or after it.
+
         @test occursin("@experimental", readlines(String(mk.file))[mk.line])
     end
 end
@@ -56,7 +51,7 @@ end
 end
 
 @testset "a marked definition that IS covered is not reported" begin
-    # Without this, a checker that reports everything would pass the previous test.
+    # Control: rejects a checker that reports everything.
     @test_broken :exercised ∉ [mk.name for mk in ExperimentalAPI.unverified(Covered)]
 end
 
@@ -65,21 +60,18 @@ end
 end
 
 @testset "coverage is absent, not zero, when the run had none enabled" begin
-    # Julia writes no `.cov` files without `--code-coverage`. Reporting 0% then would call every
-    # marked definition unverified on every ordinary test run — a false alarm that would get the
-    # check switched off.
+    # No `.cov` files without `--code-coverage`; reporting 0% then flags everything on every
+    # ordinary run.
     @test_broken ExperimentalAPI.coverage(Covered, :exercised) === missing ||
         ExperimentalAPI.coverage(Covered, :exercised) isa Real
 end
 
 @testset "a mark whose line no longer matches its definition is reported stale" begin
-    # Marks record file:line at macro-expansion. An edit above the definition moves the code but
-    # not a previously written coverage file, and joining them then attributes the wrong lines.
+    # An edit above the definition moves the code but not an existing coverage file.
     @test_broken ExperimentalAPI.stale_marks(Covered) isa AbstractVector
 end
 
 @testset "the verification report is data, not a printout" begin
-    # Same convention as `audit`: the trust number comes back on the normal return path so a
-    # release script can read it, rather than being printed for a human to eyeball.
+    # Same convention as `audit`: the number comes back on the normal return path.
     @test_broken ExperimentalAPI.verification(Covered) isa AbstractVector
 end

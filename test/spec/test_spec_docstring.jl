@@ -1,18 +1,8 @@
-# A mark and a docstring are different accounts, and they must coexist.
+# A mark and a docstring are different accounts, and must coexist.
 #
-# The registry reviewer's objection on 2026-09-02 was aimed at a README sentence that read
-# "this name is public, it has no docstring, and that is deliberate". His position — public names
-# should always have a docstring — is correct, and the package never required otherwise; the
-# framing did.
-#
-# Julia's own code settles it: `Base.Experimental` exists, and the entries sampled below carry
-# docstrings. Base marks an experimental surface AND documents it — the two are orthogonal, and
-# this file pins that with named entries rather than a count.
-#
-# No entry count is given on purpose. Measured 2026-09-03 the number moves with both the Julia
-# version and the counting rule (19 filtered / 13 documented on 1.11.9), and nothing here would
-# notice it drifting. The same pattern was deleted from the README one day earlier for exactly
-# this reason.
+# Scope: a mark is never a substitute for prose. `Base.Experimental` is the precedent — Base
+# marks an experimental surface AND documents it. Pinned by named entries rather than by a count,
+# which moves with the Julia version and the counting rule.
 
 using ExperimentalAPI:
     ExperimentalAPI, @experimental, audit, experimental, isdocumented, isexperimental, mark
@@ -50,7 +40,6 @@ end
 end # module Both
 
 @testset "Julia itself documents its experimental surface" begin
-    # The precedent that makes "documented AND experimental" not a contradiction.
     @test isdefined(Base, :Experimental)
     for n in (Symbol("@optlevel"), Symbol("@compiler_options"), :Const)
         @testset "Base.Experimental.$n" begin
@@ -61,9 +50,8 @@ end # module Both
 end
 
 @testset "a docstring survives the macro" begin
-    # The macro emits `Expr(:meta, :doc)` so a preceding docstring attaches to the definition
-    # rather than to the block the macro expands to. Without it the two accounts would be
-    # mutually exclusive in practice, whatever the documentation claimed.
+    # `Expr(:meta, :doc)` attaches the docstring to the definition rather than to the expanded
+    # block. Without it the two accounts are mutually exclusive in practice.
     @test Base.Docs.hasdoc(Both, :documented_and_marked)
     @test isexperimental(Both, :documented_and_marked)
     @test occursin(
@@ -93,31 +81,26 @@ end
 end
 
 @testset "a mark is not an excuse for missing prose" begin
-    # Under the corrected framing, `marked_only` is not "fine because it is marked". It is a
-    # public name with no docstring, and the audit has to be able to say so even though a mark
-    # is present. Today `declared` absorbs it and the distinction is unavailable.
+    # Scope: a marked name with no docstring is still undocumented. Today `declared` absorbs it.
     a = audit(Both)
     @test_broken :marked_only in a.undocumented
     @test_broken hasproperty(a, :undocumented)
 end
 
 @testset "the check can require a docstring regardless of the mark" begin
-    # `Aqua.test_undocumented_names` and `Docs.undocumented_names` already enforce
-    # "every public name has a docstring". A package adopting both should not have to choose.
+    # Scope: a package adopting both this and Aqua must not have to choose between them.
     @test_broken ExperimentalAPI.test_surface(Both; require_docstring=true) isa
         ExperimentalAPI.Audit
 end
 
 @testset "the reason is reachable from the rendered documentation" begin
-    # A reader on the docs site should see that a name is declared unfinished, and why, without
-    # the author repeating the reason by hand in the docstring — otherwise the two accounts drift.
+    # Scope: the reason must reach the docs site without the author typing it twice.
     @test_broken ExperimentalAPI.docstring_note(Both, :documented_and_marked) isa
         AbstractString
 end
 
 @testset "what Documenter's checkdocs sees is not what audit sees" begin
-    # `checkdocs = :public` fails a build on an undocumented public name and has no notion of a
-    # third answer; `audit` accepts a mark instead. Both are legitimate and they disagree here.
+    # `checkdocs = :public` has no third answer; `audit` accepts a mark. Both are legitimate.
     a = audit(Both)
     undocumented_by_base = setdiff(Base.Docs.undocumented_names(Both), [nameof(Both)])
     @test :marked_only in undocumented_by_base      # Base would flag it

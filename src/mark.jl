@@ -1,11 +1,9 @@
-# The mark itself: what one `@experimental` declaration records, where it is stored, and the
-# macro that writes it.
+# What one `@experimental` declaration records, where it is stored, and the macro that writes it.
 #
-# Storage is a `const` vector inside the MARKED module, not a table inside this one. That is not
-# a style choice — a registry living here would be populated while the marked package is being
-# precompiled, and nothing written into a third module at that moment is part of the cache image
-# that gets loaded later. Base's own `Docs.META` is a per-module binding for exactly this reason,
-# and `test/test_precompile.jl` is the test that would catch it if this stopped being true.
+# Storage is a `const` vector inside the MARKED module: a registry here would be populated during
+# the marked package's precompilation, and nothing written into a third module then survives into
+# its cache image. `Docs.META` is per-module for the same reason. Pinned by
+# `test/test_precompile.jl`.
 
 """
     Mark
@@ -36,11 +34,8 @@ struct Mark
     file::Symbol
     line::Int
 
-    # The reason is the payload, so "it may not be empty" belongs in the type rather than in one
-    # code path. Without this the check lived only in `_reason`, which only the macro calls —
-    # `Mark(Main, :x, "", nothing, nothing, :f, 1)` built an empty-reason mark quite happily, and
-    # `Mark` is `public`. Every future construction route (a method-level `mark_method!`, a
-    # deserialised snapshot) gets the invariant for free now instead of remembering to ask.
+    # The reason is the payload, so the invariant belongs in the type: `Mark` is `public`, and
+    # every construction route that is not the macro gets it for free here.
     function Mark(mod, name, reason, since, tracking, file, line)
         r = String(strip(reason))
         isempty(r) &&
@@ -64,18 +59,13 @@ function Base.show(io::IO, ::MIME"text/plain", m::Mark)
     return print(io, "  declared: ", m.file, ":", m.line)
 end
 
-# The binding every marked module gets. Named, not gensym'd, so `M.__EXPERIMENTAL_API_MARKS__`
-# is greppable and inspectable when a query result surprises someone.
+# Named rather than gensym'd, so it is greppable when a query result surprises someone.
 const MARKS_BINDING = :__EXPERIMENTAL_API_MARKS__
 
-# The registry is created by code the macro emits INTO the marked module — not by `Core.eval`
-# from here. The difference is not stylistic. Julia 1.12 rejects reading a binding that was
-# created earlier in the same top-level statement ("define the const at top-level before running
-# the function that uses it"), and a `Core.eval`-then-`getglobal` helper does exactly that. The
-# emitted form puts the `const` in one top-level statement and the `push!` in the next, so the
-# world age has advanced in between and the read is legal.
-#
-# `@macroexpand` therefore shows the whole mechanism, which is the second reason to prefer it.
+# Created by code the macro emits into the marked module, not by `Core.eval` from here: Julia
+# 1.12 rejects reading a binding created earlier in the same top-level statement, which is what a
+# `Core.eval`-then-`getglobal` helper does. The emitted form puts the `const` and the `push!` in
+# separate statements, so the world age has advanced in between.
 function _registry_of(m::Module)
     v = getglobal(m, MARKS_BINDING)
     v isa Vector{Mark} || throw(
@@ -87,8 +77,7 @@ function _registry_of(m::Module)
     return v
 end
 
-# Re-marking a name replaces its entry instead of appending, so re-including a file (Revise, an
-# `include` reached twice) cannot make one name appear in `experimental(M)` several times.
+# Replaces rather than appends, so re-including a file cannot duplicate a name.
 function _mark!(reg::Vector{Mark}, mk::Mark)
     i = findfirst(x -> x.name === mk.name, reg)
     if i === nothing
@@ -167,9 +156,8 @@ macro experimental(args...)
     isempty(rest) &&
         throw(ArgumentError("@experimental: nothing to mark — give a definition or a name"))
 
-    # `k = v` pairs bind tighter than the subject only when they are NOT the last argument: the
-    # last argument is always the thing being marked, which keeps `@experimental "…" x = 3`
-    # unambiguous against `@experimental "…" since=v"1" x = 3`.
+    # The last argument is always the subject, which keeps `@experimental "…" x = 3` unambiguous
+    # against `@experimental "…" since=v"1" x = 3`.
     since, tracking, i = nothing, nothing, 1
     while i < length(rest)
         a = rest[i]
@@ -210,16 +198,13 @@ macro experimental(args...)
         names = [_defname(def)]
     end
 
-    # Statement order carries a constraint: the `const` must land in its own top-level statement,
-    # because the `_mark!` calls below READ that binding and Julia 1.12 forbids reading a binding
-    # created in the same world age.
+    # The `const` must land in its own top-level statement: the `_mark!` calls below read that
+    # binding, and Julia 1.12 forbids reading one created in the same world age.
     marks = esc(MARKS_BINDING)
     src = __source__
-    # Built with `Expr` rather than quoted, so that no `LineNumberNode` from THIS file ends up in
-    # the expansion. `const` in local scope is a lowering error this macro cannot catch — it fires
-    # before any code it emits runs — so the only lever left is where the error points. Quoted, it
-    # named `src/mark.jl` and read as a bug in this package; the caller's own line is the line the
-    # author can act on. See `test/spec/test_spec_forms.jl`, "a mark inside a function body".
+    # Built with `Expr` so no `LineNumberNode` from this file reaches the expansion. `const` in
+    # local scope is a lowering error this macro cannot catch, so the only lever is where the
+    # error points, and it must point at the caller. Pinned in `test_spec_forms.jl`.
     init = Expr(
         :if,
         :(!$(isdefined)($__module__, $(QuoteNode(MARKS_BINDING)))),
@@ -239,16 +224,14 @@ macro experimental(args...)
             ),
         )) for n in names
     ]
-    # `Expr(:meta, :doc)` is how a macro tells the documentation system which expression inside
-    # its expansion a preceding docstring belongs to — the mechanism `Base.@kwdef` uses. Without
-    # it, `"""docs""" @experimental "why" f(x) = x` fails with "cannot document the following
-    # expression", which would make the two accounts this package asks for mutually exclusive.
+    # Tells the documentation system which expression a preceding docstring belongs to, as
+    # `Base.@kwdef` does. Without it a docstring on a marked definition fails to attach at all.
     body = def === nothing ? nothing : Expr(:block, Expr(:meta, :doc), esc(def))
     return Expr(:block, init, body, records..., nothing)
 end
 
-# Whitespace is normalised so a reason written as a wrapped triple-quoted string does not carry
-# its indentation into every message that prints it. Nothing else about the text is touched.
+# Normalises whitespace so a wrapped triple-quoted reason does not carry its indentation into
+# every message. Nothing else about the text is touched.
 function _reason(s)
     r = String(strip(s))
     isempty(r) && throw(
@@ -268,9 +251,8 @@ function _subject_names(subject)
             a.args[1] isa Symbol &&
             length(a.args) == 2 &&
             a.args[2] isa LineNumberNode
-            # A BARE `@foo` — the name a macro is public under. A macrocall carrying arguments
-            # is a definition this macro cannot read, not a name, and must fall through to be
-            # refused rather than silently recorded as `Symbol("@doc")`.
+            # A bare `@foo` is a name; a macrocall carrying arguments is a definition this macro
+            # cannot read, and must fall through to be refused rather than recorded.
             push!(names, a.args[1])
         elseif a isa QuoteNode && a.value isa Symbol
             push!(names, a.value)              # `:foo`, for a name a reader prefers to quote
@@ -293,8 +275,8 @@ function _defname(ex::Expr)
     h === :abstract && return _typename(ex.args[1])
     h === :primitive && return _typename(ex.args[1])
     h === :const && return _defname(ex.args[1])
-    # A `module` cannot be flattened out of the block this macro emits — Julia requires it as a
-    # direct top-level statement — so it takes the name-list form rather than being wrapped.
+    # Julia requires `module` as a direct top-level statement, so it cannot be wrapped and takes
+    # the name-list form.
     h === :module && throw(
         ArgumentError(
             "@experimental cannot attach to a `module`, which Julia requires at top level. " *

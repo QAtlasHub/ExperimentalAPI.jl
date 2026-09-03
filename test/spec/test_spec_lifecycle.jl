@@ -1,20 +1,8 @@
-# The mark has an exit, and something has to say when it may be taken.
+# The mark's exit — when it may be removed — and entry points that are not a single function.
 #
-# From the design letter on General#166832:
-#
-#   「この `@experimental` を安全に外していく、というのを中間ゴールに据えた開発が可能になります」
-#
-# That is the part that makes this a work item rather than a permanent label. A mark that can only
-# ever be added is a decoration; a mark with a defined exit is a plan. Nothing in the rest of this
-# directory covers the exit, so it is here.
-#
-# The other half is end-to-end analysis. The letter's reading of Lean is that `sorry` lets the
-# whole development be checked with the unproven proposition still in it —
-#
-#   「`sorry`がついた真偽不明の命題として e2e でコードの解析を実行できる」
-#
-# — and `#print axioms` answers for any declaration, not only for one you hand it. The analogue
-# here is an entry point that is a MODULE or a script, not just a function with argument types.
+# Scope: a mark that can only ever be added is a decoration. The exit is what makes it a work
+# item. The entry point has to be a module or a script, as `#print axioms` answers for any
+# declaration and not only for one it is handed.
 
 using ExperimentalAPI: ExperimentalAPI, @experimental, audit, experimental, mark
 using Test
@@ -25,8 +13,7 @@ using ExperimentalAPI
 
 public verified_now, still_unverified, tracked_but_unresolved, settled, consumer, entry
 
-# A mark whose reason has been discharged: the reference value now exists and the test suite
-# exercises it. This is the one that should be removable.
+# Reason discharged: reference value exists, suite exercises it. This one is removable.
 @experimental(
     "no reference value yet",
     since = v"0.1.0",
@@ -41,11 +28,8 @@ public verified_now, still_unverified, tracked_but_unresolved, settled, consumer
     still_unverified(β::Float64) = β * 1.0000001
 )
 
-# A third mark, and the reason it is here: without it, `verified_now` and `still_unverified`
-# differ ONLY in whether `tracking` is set, so `ready_to_promote(m, n) = mark(m,n).tracking !==
-# nothing` — a rule with no relationship at all to "has the reason been discharged" — satisfies
-# both assertions below. This one HAS a tracking link and is still not ready, which breaks that
-# shortcut. The fixture has to vary on the axis under test, not on a neighbouring one.
+# Without a third mark, the two above differ only in whether `tracking` is set, and a rule keyed
+# on that alone would satisfy every assertion below. This one has a link and is still not ready.
 @experimental(
     "reference value exists but disagrees with the literature at the third digit",
     since = v"0.1.0",
@@ -78,23 +62,21 @@ end
 # ── end-to-end: an entry point that is not a single function ─────────────────────────────────
 
 @testset "a whole module can be the entry point" begin
-    # `#print axioms` answers for any declaration; the analogue is "does anything this package
-    # exposes reach unvalidated code". Asking function-by-function does not scale to a package.
+    # Function-by-function does not scale to a package.
     @test_broken ExperimentalAPI.verdict(ExperimentalAPI.reach(Lifecycle)) === :depends
 end
 
 @testset "the module-level answer names which public entry points are affected" begin
-    # "Something in here is experimental" is not actionable for a package with 310 public names.
+    # "Something in here is experimental" is not actionable at package scale.
     @test_broken :entry in
         [e.name for e in ExperimentalAPI.reach(Lifecycle).affected_entries]
-    # …and `settled` reaches nothing marked, so it must NOT be listed. Without this, a walk that
-    # reports every public name whenever the module contains any mark at all passes.
+    # Control: `settled` reaches nothing marked and must not be listed.
     @test_broken :settled ∉
         [e.name for e in ExperimentalAPI.reach(Lifecycle).affected_entries]
 end
 
 @testset "a module with nothing marked comes back clean" begin
-    # The negative control for the two above.
+    # Control for the two above.
     @eval module CleanModule
     "Settled."
     f(x) = x
@@ -104,12 +86,8 @@ end
 end
 
 @testset "a script can be the entry point" begin
-    # The shape a researcher actually has: not a package, a file that produces a figure.
-    #
-    # Two traps avoided here. `tempname()` returns a path and creates NO file, so reading it
-    # throws `SystemError` forever regardless of the implementation — the same defect fixed one
-    # commit earlier for `stamp`. And `isa Any` is true of every Julia value, so it would have
-    # reported Unexpected Pass for a no-op returning `nothing`.
+    # The shape a researcher has: a file that produces a figure, not a package. The file must be
+    # written — `tempname()` alone throws regardless of the implementation.
     path = tempname()
     write(path, "1 + 1\n")
     @test isfile(path)
@@ -119,22 +97,18 @@ end
 # ── the exit: what licenses removing a mark ──────────────────────────────────────────────────
 
 @testset "the tool says a mark is ready to be removed, and why" begin
-    # Not "is this marked" but "may this stop being marked". The evidence has to be nameable:
-    # the reason discharged, the definition exercised, a reference value present.
+    # Not "is this marked" but "may this stop being marked", with nameable evidence.
     @test_broken ExperimentalAPI.ready_to_promote(Lifecycle, :verified_now) === true
 end
 
 @testset "a mark whose reason still stands is NOT reported ready" begin
-    # Without this, a checker that says "ready" for everything passes the test above. All three
-    # definitions in the fixture are exercised by this suite, so coverage cannot be the whole
-    # criterion — which is the point.
+    # Control: rejects a checker that says "ready" for everything. All three are exercised by
+    # this suite, so coverage cannot be the whole criterion.
     @test_broken ExperimentalAPI.ready_to_promote(Lifecycle, :still_unverified) === false
 end
 
 @testset "having a tracking link is not the same as being ready" begin
-    # `tracked_but_unresolved` carries a tracking link and is still not ready. Without this,
-    # `ready_to_promote(m, n) = mark(m, n).tracking !== nothing` — which has nothing to do with
-    # the criteria the comments name — satisfies both testsets above.
+    # Control: rejects a rule keyed on `tracking` alone.
     @test mark(Lifecycle, :tracked_but_unresolved).tracking !== nothing
     @test mark(Lifecycle, :verified_now).tracking !== nothing
     @test mark(Lifecycle, :still_unverified).tracking === nothing
@@ -143,11 +117,8 @@ end
 end
 
 @testset "removing a mark is reported as not breaking" begin
-    # `compare` already treats experimental → stable as non-breaking for names. The exit needs it
-    # stated in the direction a person asks the question: I am about to delete this line, is that
-    # a release event?
-    # Already implemented — promoted from @test_broken after the suite reported Unexpected Pass,
-    # which is the mechanism this directory exists for.
+    # Stated in the direction a person asks it: I am about to delete this line, is that a
+    # release event?
     @test !ExperimentalAPI.isbreaking(
         ExperimentalAPI.compare(
             Dict(
@@ -160,9 +131,8 @@ end
 end
 
 @testset "…but DELETING it outright still is" begin
-    # The negative control. Promoting a mark and deleting the name are both "the mark is gone" to
-    # a careless reading, and only one of them is safe. Without this the test above would pass for
-    # an `isbreaking` that always answers false.
+    # Control: promoting a mark and deleting the name both read as "the mark is gone", and only
+    # one is safe.
     d = ExperimentalAPI.compare(
         Dict("stable" => ["settled", "verified_now"], "experimental" => Dict()),
         Dict("stable" => ["settled"], "experimental" => Dict()),
@@ -172,9 +142,7 @@ end
 end
 
 @testset "removing the mark flips its callers, and only its callers" begin
-    # The propagation half of the exit. After `verified_now` is promoted, `consumer` becomes
-    # clean; `entry` does not, because it still reaches `still_unverified`. A tool that flips
-    # everything, or nothing, fails one of these.
+    # `consumer` becomes clean; `entry` does not, since it still reaches `still_unverified`.
     @test_broken ExperimentalAPI.verdict(
         ExperimentalAPI.reach(Lifecycle.consumer, Tuple{Float64}; ignore=[:verified_now])
     ) === :clean
@@ -184,38 +152,30 @@ end
 end
 
 @testset "how long a mark has been standing is answerable" begin
-    # `since` is recorded and nothing reads it. "Experimental" that never expires is just a label,
-    # and the letter's framing — an intermediate goal — needs the clock to be visible.
+    # `since` is recorded and nothing reads it; a mark that never expires is just a label.
     @test mark(Lifecycle, :still_unverified).since == v"0.1.0"
-    # Not `isa Any` — that is true of every value, including `nothing` from a stub. Assert the
-    # number the caller actually needs: eight minor releases have passed since v0.1.0.
+    # The number the caller needs, not `isa Any` — which is true of `nothing` from a stub.
     @test_broken ExperimentalAPI.age(Lifecycle, :still_unverified, v"0.9.0") == 8
 end
 
 @testset "the number of marks can only go down under a ratchet" begin
-    # The mechanism that makes "an intermediate goal" real rather than aspirational, and the same
-    # shape as `test_surface`'s skip list, which already only shrinks.
-    #
-    # `isa Audit` will NOT do: `test_surface` is documented to return the audit on the normal
-    # return path whether the testset passed or not, so an implementation that accepts
-    # `max_marks` and ignores it satisfies that. Assert what the cap actually does.
+    # Same shape as `test_surface`'s skip list. Not `isa Audit`: that comes back whether the cap
+    # was honoured or ignored, so assert what the cap does.
     @test length(experimental(Lifecycle)) == 3
     @test_broken ExperimentalAPI.exceeds_mark_cap(Lifecycle, 1) === true
     @test_broken ExperimentalAPI.exceeds_mark_cap(Lifecycle, 5) === false
 end
 
 @testset "a mark removed while callers still depend on it is caught" begin
-    # The failure mode of removing one carelessly: the line is deleted because the author looked
-    # at the definition, not at who reaches it. That is what propagation is for, read backwards.
+    # Propagation read backwards: the line gets deleted because the author looked at the
+    # definition, not at who reaches it.
     @test_broken :consumer in ExperimentalAPI.dependents(Lifecycle, :verified_now)
-    # `settled` calls nothing marked, so it is nobody's dependent. Without this, a `dependents`
-    # that returns every public name passes.
+    # Control: rejects a `dependents` that returns every public name.
     @test_broken :settled ∉ ExperimentalAPI.dependents(Lifecycle, :verified_now)
 end
 
 @testset "the exit works at method granularity too" begin
-    # `test_spec_dispatch.jl` argues that a name-keyed mark over-claims when a name has several
-    # methods. The exit has the same problem read backwards: promoting one method of a name must
-    # not promote its siblings. Neither file tests the intersection, so it is stated here.
+    # The intersection neither this file nor `test_spec_dispatch.jl` covers: promoting one
+    # method must not promote its siblings.
     @test_broken ExperimentalAPI.ready_to_promote isa Function
 end

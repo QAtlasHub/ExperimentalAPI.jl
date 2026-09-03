@@ -1,11 +1,7 @@
-# What can carry a mark.
+# What can carry a mark: function, method, struct, const, module, macro, extension.
 #
-# The current implementation marks a NAME. The intent is to mark a definition — and for
-# `QAtlas.fetch`, which has 570 methods behind one name (see `test_spec_foreign.jl`), the name is the wrong unit: a docstring
-# on `fetch` cannot say which dispatch path returns a number you can trust.
-#
-# So this file covers both: what works today (plain `@test`) and what the unit has to become
-# (`@test_broken`).
+# Scope: both what the name-keyed implementation does today (plain `@test`) and the method-level
+# unit it has to become (`@test_broken`).
 
 using ExperimentalAPI: ExperimentalAPI, @experimental, Mark, experimental, isexperimental
 using Test
@@ -57,8 +53,7 @@ listed_b(x) = x
 "Documented and settled."
 documented_fn(x) = x
 
-# The shape the method-level unit has to reach: one name, several dispatch paths, and only one
-# of them is in doubt. This is `QAtlas.fetch` in miniature.
+# One name, several dispatch paths, only one in doubt — `QAtlas.fetch` in miniature.
 struct Exact end
 struct Numerical end
 energy(::Exact, β::Float64) = β
@@ -91,8 +86,7 @@ end # module Declared
 end
 
 @testset "nothing else is reported as marked" begin
-    # Without this, an `experimental()` that leaks every declared name — rather than only the
-    # marked ones — passes every assertion above.
+    # Control: rejects an `experimental()` that leaks every declared name.
     got = Set(mk.name for mk in experimental(Declared))
     @test length(got) == 12
     for unmarked in (:documented_fn, :energy, :Exact, :Numerical)
@@ -113,12 +107,11 @@ end
 
 # ── the method-level unit ────────────────────────────────────────────────────────────────────
 #
-# `Declared.energy` has three methods. Marking the name marks all three, which is the granularity
-# problem: the exact-solution path is trustworthy and the numerical one is not.
+# `Declared.energy` has three methods; marking the name marks all three, including the exact one.
 
 @testset "marking a name is the wrong unit when the name has many methods" begin
     @test length(methods(Declared.energy)) == 3
-    # Today the only available statement is about the name, so it necessarily over-claims.
+    # Today the statement is about the name, so it over-claims.
     @test !isexperimental(Declared, :energy)   # not marked at all yet — see below
 end
 
@@ -139,14 +132,12 @@ end
 end
 
 @testset "a method mark survives precompilation" begin
-    # The name-keyed registry already survives (test/test_precompile.jl). `Method` objects are
-    # part of the defining module's image too, but that is a separate claim and needs its own
-    # fixture package before it can be asserted.
+    # Scope: the name-keyed registry already survives (`test/test_precompile.jl`); whether
+    # `Method` objects do is a separate claim needing its own fixture package.
     @test_broken ExperimentalAPI.experimental_methods isa Function
 end
 
 @testset "a method mark is queryable from a call site" begin
-    # The question a downstream test actually asks, before trusting a reference value.
     @test_broken ExperimentalAPI.isexperimental(
         which(Declared.energy, Tuple{Declared.Numerical,Float64})
     )
@@ -154,15 +145,14 @@ end
 
 # ── extensions ───────────────────────────────────────────────────────────────────────────────
 #
-# A package extension is a separate module. Names it makes public are part of the package's
-# surface from a user's point of view, and are invisible to `names(Package)`.
+# An extension is a separate module: its public names are part of the surface a user sees, and
+# invisible to `names(Package)`.
 
 @testset "a mark inside a package extension is reachable from the parent" begin
     ext = Base.get_extension(ExperimentalAPI, :ExperimentalAPITestExt)
     @test ext !== nothing
-    # `!isempty(...)` would NOT do: ExperimentalAPI marks six of its own names in `src/release.jl`
-    # (dogfooding), so a keyword that is accepted and then completely ignored would satisfy it.
-    # The claim is that a mark whose home is the EXTENSION comes back.
+    # Not `!isempty(...)`: this package marks six of its own names, so an ignored keyword would
+    # satisfy that. The claim is that a mark whose home is the extension comes back.
     @test isempty(ExperimentalAPI.experimental(ext))          # today the extension declares none
     @test_broken any(
         mk -> mk.mod === ext, ExperimentalAPI.experimental(ExperimentalAPI; extensions=true)
@@ -170,10 +160,8 @@ end
 end
 
 @testset "every new Audit field keeps the partition invariant" begin
-    # Three files each pin a new `Audit` field with `hasproperty` alone — `:extensions` here,
-    # `:undocumented` in the docstring spec, `:contributed_methods` in the foreign spec — written
-    # without cross-referencing each other. `hasproperty` is blind to whether the property the
-    # type exists for still holds once three fields are bolted on from three directions.
+    # Three files each add an `Audit` field behind `hasproperty` alone. `hasproperty` cannot see
+    # whether the partition still holds once all three land.
     a = ExperimentalAPI.audit(ExperimentalAPI)
     @test sort(
         vcat(a.foreign, a.documented, a.unaccounted, setdiff(a.declared, a.documented))
@@ -183,7 +171,6 @@ end
 
 @testset "auditing a package does not silently ignore its extensions" begin
     a = ExperimentalAPI.audit(ExperimentalAPI)
-    # Today `audit` looks at one module. Whether an extension's surface is in scope has to be a
-    # stated answer rather than an omission.
+    # Scope: `audit` looks at one module today; whether extensions are included must be stated.
     @test_broken hasproperty(a, :extensions)
 end

@@ -1,15 +1,7 @@
-# Generates the coverage table for `test/spec/README.md` and for the pull request that ships it.
+# Generates the coverage table for `test/spec/README.md` and the pull request that ships it.
 #
-# Written because the hand-maintained version drifted inside the very change that argues prose
-# drifts and tests do not: two spec files landed after the table was typed, and every count in it
-# was stale. A table that is generated from the files and pinned by a test cannot do that.
-#
-# The published measure is DISTINCT BEHAVIOURS — one per leaf `@testset` — not assertions. An
-# assertion count moves without any implementation progress: `test_spec_declare.jl` has 36
-# assertion lines but 91 runtime assertions, because several of them run inside
-# `for mk in experimental(Declared)`, so adding a thirteenth fixture mark buys four more passing
-# assertions and covers nothing new. A leaf testset is one claim about the package, and adding
-# one means writing one.
+# The measure is DISTINCT BEHAVIOURS — one per leaf `@testset` — not assertions, which move
+# without any implementation progress when they sit inside a loop over the fixture's marks.
 #
 # Run it:  julia --project=test test/spec/summary.jl
 
@@ -17,8 +9,7 @@ module SpecSummary
 
 const SPEC_DIR = @__DIR__
 
-# One line per spec file. A file with no entry here is an ERROR, not an omission — the previous
-# table was written by listing files by hand, and silently lost `dispatch` and `lifecycle`.
+# One line per spec file. A file with no entry here is an error, not a missing row.
 const CONCERNS = Dict(
     "test_spec_declare.jl" => "what can carry a mark: function, method, struct, const, module, macro, extension",
     "test_spec_forms.jl" => "the definition forms a real package hits on its second afternoon",
@@ -65,10 +56,8 @@ What one spec file contains. `operating` and `specified` partition `behaviours`:
 either runs at least one assertion against the package today, or it is entirely `@test_broken` —
 a claim written down and not yet checked against anything.
 
-The distinction is the point. "Every group has a negative control" is true of this directory as
-a *specification* and false of it as a *running suite*: `test_spec_profile.jl`'s control that a
-never-called mark is absent rather than reported with count zero is itself `@test_broken`, so it
-controls nothing until the implementation lands.
+The distinction is the point: "every group has a negative control" is true of this directory as a
+specification and false of it as a running suite.
 """
 struct Counts
     behaviours::Int
@@ -84,8 +73,8 @@ function counts(path::AbstractString)
     behaviours = operating = 0
     for ts in sets
         body = ts.args[2:end]
-        # A leaf is a testset with no testset inside it. Loop-generated `@testset "$T"` blocks
-        # are one leaf each, not one per iteration: a behaviour is something someone wrote.
+        # A leaf has no testset inside it. A loop-generated `@testset "$T"` is one leaf, not one
+        # per iteration: a behaviour is something someone wrote.
         sum(b -> _count(y -> _ismacrocall(y, Symbol("@testset")), b), body) == 0 || continue
         behaviours += 1
         live = sum(

@@ -1,32 +1,17 @@
-# Propagation: a caller that never names a marked thing still depends on it.
+# A caller that never names a marked thing still depends on it.
 #
-# The model is Lean's `sorry`. Measured 2026-09-03 with Lean 4.33.1:
-#
-#     P.lean:1:8: warning: declaration uses `sorry`
-#     'unproven'   depends on axioms: [sorryAx]
-#     'downstream' depends on axioms: [sorryAx]     <- never wrote `sorry` itself
-#     'honest'     does not depend on any axioms
-#
-# Julia cannot match that exactly, and the difference is the most important thing in this file.
-# Lean's kernel has a closed dependency graph of proof terms; Julia's call graph is not closed.
-# So the answer is not a Bool. It is three-valued:
+# Modelled on Lean's `sorry`, but Julia's call graph is not closed, so the answer is three-valued:
 #
 #     :depends   a marked definition is reachable
 #     :clean     the whole call graph was resolved and nothing marked is in it
 #     :unknown   some call site could not be resolved — the honest non-answer
 #
-# Collapsing `:unknown` into `:clean` is the one failure this file exists to prevent. A tool that
-# reports "no experimental dependency" about a call graph it could not see has not made a weaker
-# claim, it has made a false one.
+# Scope: collapsing `:unknown` into `:clean` is the one failure this file exists to prevent. It is
+# not a weaker claim, it is a false one.
 #
-# Feasibility was measured on 2026-09-03, **Julia 1.12.2**, with a custom
-# `Core.Compiler.AbstractInterpreter` hooking `abstract_call_method`. Inference runs before
-# inlining, so the call graph is intact there; post-processing `code_typed(...; optimize=true)`
-# sees only `mul_float`/`add_float` and finds nothing.
-#
-# The Julia version is load-bearing and is stated for the same reason `Lean 4.33.1` is above:
-# `Core.Compiler` is internal and carries no stability guarantee across releases. This repository's
-# CI spans 1.11 and 1.12, and the measurement was taken on one of them.
+# The mechanism is a `Core.Compiler.AbstractInterpreter` hooking `abstract_call_method`, because
+# inference runs before inlining; `code_typed(...; optimize=true)` sees only `mul_float` and finds
+# nothing.
 
 using ExperimentalAPI: ExperimentalAPI, @experimental, experimental
 using Test
@@ -65,11 +50,11 @@ mid_good(x::Float64) = solid(x) + 1.0
 top_bad(x::Float64) = mid_bad(x) * 3
 top_good(x::Float64) = mid_good(x) * 3
 
-# a function passed as a value. Julia specialises on `typeof(f)`, so inference resolves this.
+# passed as a value — Julia specialises on `typeof(f)`, so this resolves
 apply(f, x::Float64) = f(x)
 top_arg(x::Float64) = apply(unstable, x)
 
-# `@nospecialize` — measured to STILL resolve
+# `@nospecialize` — still resolves
 top_nospec(@nospecialize(f), x::Float64) = f(x)
 
 # genuinely unresolvable: the callee is a value chosen at run time
@@ -84,9 +69,8 @@ top_table(i::Int, x::Float64) = TABLE[i](x)
 # termination
 top_recursive(n::Int, x::Float64) = n <= 0 ? unstable(x) : top_recursive(n - 1, x)
 
-# A chain deep enough that a depth limit MUST truncate before reaching the mark. `top_recursive`
-# calls `unstable` in its own body, so it is visible at depth 1 whatever `maxdepth` says — a
-# depth test written against it would pass for an implementation that ignores the keyword.
+# Deep enough that a depth limit must truncate. `top_recursive` calls `unstable` in its own body,
+# so a depth test written against that one would pass for an implementation ignoring the keyword.
 deep_5(x::Float64) = unstable(x)
 deep_4(x::Float64) = deep_5(x)
 deep_3(x::Float64) = deep_4(x)
@@ -119,27 +103,21 @@ end
 
 # ── the type the answer lives in ─────────────────────────────────────────────────────────────
 #
-# `Mark` and `Audit` are both pinned nominally somewhere in this directory (`isa Mark`,
-# `isa Audit`). The propagation result is not: before these tests it was pinned purely by field
-# name, so a `NamedTuple` with `.reached`/`.unresolved` satisfied every assertion in four files
-# and `verdict` could be duck-typed on `hasproperty`.
+# `Mark` and `Audit` are pinned nominally elsewhere in this directory. Without the same here, a
+# `NamedTuple` with the right field names satisfies every assertion in four files.
 
 @testset "the result has a type, not just field names" begin
     @test_broken ExperimentalAPI.reach(Chain.top_bad, ENTRY) isa ExperimentalAPI.Reach
 end
 
 @testset "verdict is derived, never stored" begin
-    # `isbreaking(d::Diff)` is a pure function over `d.removed_stable`/`d.demoted`, never a cached
-    # field — which is why a `Diff` cannot claim "not breaking" while carrying a removal. Same
-    # rule here: if `verdict` were a stored field, `:clean` with a non-empty `.unresolved` would
-    # become representable, and that is the one state this whole file exists to forbid.
+    # A stored `verdict` makes `:clean` with a non-empty `.unresolved` representable, which is
+    # the one state this file forbids. Same rule as `isbreaking(d::Diff)`.
     @test_broken !hasproperty(ExperimentalAPI.reach(Chain.top_bad, ENTRY), :verdict)
 end
 
 @testset "a boolean gate exists alongside the three-valued answer" begin
-    # Every existing verdict in this package is a named predicate — `isbreaking`,
-    # `isexperimental`, `isdocumented` — never a comparison the caller writes out. The spec
-    # hand-writes `verdict(...) === :clean` and friends 26 times, which is the smell.
+    # Every other verdict here is a named predicate, never a comparison the caller writes out.
     @test_broken ExperimentalAPI.isclean(ExperimentalAPI.reach(Chain.top_good, ENTRY)) ===
         true
     @test_broken ExperimentalAPI.isclean(ExperimentalAPI.reach(Chain.top_bad, ENTRY)) ===
@@ -147,9 +125,8 @@ end
 end
 
 @testset ":unknown absorbs when results are combined" begin
-    # `reach(Module)` has to fold the verdicts of every public entry into one answer, so the
-    # algebra has to exist. It is stated here rather than discovered: a module with one
-    # `:unknown` entry is not clean, whatever the others say, and folding is order-independent.
+    # `reach(Module)` folds every public entry into one answer, so the algebra must exist: one
+    # `:unknown` is not clean whatever the others say, and folding is order-independent.
     @test_broken ExperimentalAPI.combine(:clean, :unknown) === :unknown
     @test_broken ExperimentalAPI.combine(:depends, :unknown) === :depends
     @test_broken ExperimentalAPI.combine(:clean, :depends) === :depends
@@ -168,14 +145,14 @@ end
 end
 
 @testset "an equally deep caller with nothing marked is reported clean" begin
-    # Without this the previous test passes for a tool that always says `:depends`.
+    # Control: rejects a tool that always says `:depends`.
     @test_broken ExperimentalAPI.verdict(ExperimentalAPI.reach(Chain.top_good, ENTRY)) ===
         :clean
     @test_broken isempty(ExperimentalAPI.reach(Chain.top_good, ENTRY).reached)
 end
 
 @testset "a function passed as a value is still followed" begin
-    # Measured: Julia specialises on `typeof(f)`, so this resolves. It is NOT a dynamic hole.
+    # Specialisation on `typeof(f)` resolves this; it is not a dynamic hole.
     @test_broken ExperimentalAPI.verdict(ExperimentalAPI.reach(Chain.top_arg, ENTRY)) ===
         :depends
 end
@@ -189,8 +166,7 @@ end
 # ── the honest non-answer ────────────────────────────────────────────────────────────────────
 
 @testset "an abstract-typed callee field is :unknown, NOT :clean" begin
-    # `Holder.f::Function` can hold `unstable`. Reporting `:clean` here would be a lie, and it is
-    # exactly what the prototype did before the third value existed.
+    # `Holder.f::Function` can hold `unstable`, so `:clean` here is a lie.
     @test_broken ExperimentalAPI.verdict(
         ExperimentalAPI.reach(Chain.top_field, Tuple{Chain.Holder,Float64})
     ) === :unknown
@@ -209,7 +185,7 @@ end
 end
 
 @testset "every unresolved site says where it is" begin
-    # "cannot tell" is only actionable if the user can go and look.
+    # "cannot tell" is actionable only if the user can go and look.
     @test_broken all(
         u -> hasproperty(u, :file) && hasproperty(u, :line),
         ExperimentalAPI.reach(Chain.top_field, Tuple{Chain.Holder,Float64}).unresolved,
@@ -217,13 +193,12 @@ end
 end
 
 @testset "a depth limit reports :unknown rather than :clean" begin
-    # `deep_1` is five hops from the mark, so `maxdepth=2` must truncate. Asserting `:unknown`
-    # rather than `!== :clean` is what separates "the limit produced the honest non-answer" from
-    # "the limit was silently ignored and the mark was found anyway".
+    # `:unknown` rather than `!== :clean`: the latter cannot separate "the limit truncated" from
+    # "the limit was ignored and the mark was found anyway".
     @test_broken ExperimentalAPI.verdict(
         ExperimentalAPI.reach(Chain.deep_1, ENTRY; maxdepth=2)
     ) === :unknown
-    # …and the same entry point WITHOUT the limit finds it, so the fixture can disagree.
+    # …and without the limit it is found, so the fixture can disagree.
     @test_broken ExperimentalAPI.verdict(ExperimentalAPI.reach(Chain.deep_1, ENTRY)) ===
         :depends
 end
@@ -245,9 +220,8 @@ end
 # ── things that are not calls ────────────────────────────────────────────────────────────────
 
 @testset "a marked const is seen where it is used" begin
-    # A const is not a call site, so the call-graph walk cannot find it. Either the analysis
-    # reads globals out of the IR as well, or this case has to be declared out of scope in the
-    # documentation. What it must not do is report `:clean`.
+    # A const is not a call site. Either the analysis reads globals out of the IR, or the case is
+    # declared out of scope — what it must not do is report `:clean`.
     @test_broken ExperimentalAPI.verdict(
         ExperimentalAPI.reach(Chain.top_uses_const, ENTRY)
     ) !== :clean
@@ -260,25 +234,22 @@ end
 end
 
 @testset "marking a module marks what it contains" begin
-    # Or it does not, and that is stated. Either way it is a decision, not an omission.
+    # Or it does not, stated. Either way a decision, not an omission.
     @test_broken hasproperty(ExperimentalAPI.reach(Chain.top_bad, ENTRY), :through_modules)
 end
 
 # ── across packages ──────────────────────────────────────────────────────────────────────────
 
 @testset "a mark in a dependency propagates into the dependent" begin
-    # The QAtlas case: a downstream analysis calls `fetch`, which is marked in QAtlas.
-    # Requires the fixture package, so it is only pinned as an API shape here.
+    # Needs the fixture package, so only the API shape is pinned here.
     @test_broken ExperimentalAPI.reach isa Function
 end
 
 # ── cost ─────────────────────────────────────────────────────────────────────────────────────
 
 @testset "the macro emits nothing but the definition and one push" begin
-    # The previous version of this test filtered `methods(_mark!)` for a name containing "reach".
-    # `Method.name` is the GENERIC FUNCTION's name — always `:_mark!`, never derived from what the
-    # body calls — so the filter was unconditionally empty and the assertion could not fail even
-    # if `_mark!` called `reach` directly. Look at the expansion instead.
+    # Look at the expansion: `Method.name` is the generic function's name, so filtering methods
+    # by what their bodies call is unconditionally empty.
     emitted = string(@macroexpand @experimental "why" f(x) = x)
     @test occursin("_mark!", emitted)                       # the one load-time effect
     @test occursin("__EXPERIMENTAL_API_MARKS__", emitted)
