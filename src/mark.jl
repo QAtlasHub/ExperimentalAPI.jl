@@ -100,14 +100,20 @@ list of names** already defined elsewhere:
 
 ```julia
 # attached to the definition
-@experimental "signature will be wrapped once the write-back refactor settles" \
-function ingest(config; doc, kwargs...)
-    # ...
-end
+@experimental(
+    "signature will be wrapped once the write-back refactor settles",
+    function ingest(config; doc, kwargs...)
+        # ...
+    end,
+)
 
 # declared for names defined in an included file
-@experimental "reads Test's internal result tree; not dogfooded in CI" \
-    render_test_report dump_test_report load_test_dump
+@experimental(
+    "reads Test's internal result tree; not dogfooded in CI",
+    render_test_report,
+    dump_test_report,
+    load_test_dump,
+)
 ```
 
 Optional `since=` and `tracking=` come between the reason and the subject. `tracking` is what

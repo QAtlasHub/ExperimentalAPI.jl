@@ -14,17 +14,21 @@ This is the part the rest of the package exists for.
 | bucket | meaning |
 |---|---|
 | `documented` | has a docstring |
-| `declared` | has an [`@experimental`](@ref) mark (may also be documented) |
+| `declared` | has an [`@experimental`](@ref) mark — an *additional* account, never a substitute |
 | `foreign` | public here, but bound in another package — not this module's to account for |
-| `unaccounted` | **neither documented nor declared** — the finding |
+| `undocumented` | **no docstring, marked or not** — the finding [`test_surface`](@ref) asserts empty |
+| `unaccounted` | neither account at all — a subset of `undocumented`, and the worst case |
 | `dangling` | marked, but not public — the module contradicting itself |
+
+A mark says the shape is unsettled. That is never a reason to say nothing about what the name
+does, so a marked name with no prose is a finding exactly as an unmarked one is.
 
 ```julia
 julia> audit(Archeion)
 Public surface of Archeion — 36 names
   documented      33
   experimental     0
-  unaccounted      3   ← neither documented nor @experimental
+  undocumented     3   ← no docstring
      FTPSTransport, pull_file, push_dir
 ```
 
@@ -86,10 +90,10 @@ The two checks are complementary and neither subsumes the other:
 makedocs(; modules = [MyPackage], checkdocs = :public)   # every public name has a docstring
 ```
 
-Documenter's `checkdocs = :public` fails a build when a public name has no docstring — but it has
-no notion of "declared unfinished instead", so a package that wants that third option needs both:
-`checkdocs` for the names that must be documented, `test_surface` for the rule that lets a mark
-stand in for a docstring.
+Documenter's `checkdocs = :public` fails a build when a public name has no docstring, and
+[`test_surface`](@ref) requires the same thing — the two agree, and running both is not a
+contradiction. What `test_surface` adds is `foreign` (a re-exported name whose prose is somebody
+else's job) and `dangling` (a mark on a name that was never made public), neither of which
+Documenter has a notion of.
 
-If you would rather run only one, run `test_surface`: it accepts everything `checkdocs = :public`
-accepts, plus marks.
+Run both. Neither is a looser version of the other.

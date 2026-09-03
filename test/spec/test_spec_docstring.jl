@@ -81,16 +81,21 @@ end
 end
 
 @testset "a mark is not an excuse for missing prose" begin
-    # Scope: a marked name with no docstring is still undocumented. Today `declared` absorbs it.
+    # Scope: a marked name with no docstring is still undocumented.
     a = audit(Both)
-    @test_broken :marked_only in a.undocumented
-    @test_broken hasproperty(a, :undocumented)
+    @test hasproperty(a, :undocumented)
+    @test :marked_only in a.undocumented
+    # …and it is not in `unaccounted`, which stays the stricter bucket: neither account at all.
+    @test :marked_only ∉ a.unaccounted
 end
 
-@testset "the check can require a docstring regardless of the mark" begin
-    # Scope: a package adopting both this and Aqua must not have to choose between them.
-    @test_broken ExperimentalAPI.test_surface(Both; require_docstring=true) isa
-        ExperimentalAPI.Audit
+@testset "requiring a docstring is the default, not a knob" begin
+    # This was specified as `test_surface(m; require_docstring=true)`. The requirement changed
+    # after review: a switch that turns the docstring rule off wholesale is the looser practice
+    # the mark must not encourage. `skip` is the only escape — per-name, visible, and it can
+    # only shrink. So the assertion is that no such switch exists.
+    @test :require_docstring ∉ Base.kwarg_decl(only(methods(ExperimentalAPI.test_surface)))
+    @test :skip in Base.kwarg_decl(only(methods(ExperimentalAPI.test_surface)))
 end
 
 @testset "the reason is reachable from the rendered documentation" begin

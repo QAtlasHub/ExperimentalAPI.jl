@@ -38,12 +38,16 @@ end
 failures(ts::Recorder) = [p for (p, r) in leaves(ts) if !(r isa Test.Pass)]
 failed_names(ts::Recorder) = Set(last(p) for p in failures(ts))
 
+# `marked` carries BOTH accounts, because a mark is no longer an alternative to prose. The
+# fixture had only the mark, and it stopped being a clean module the moment that changed —
+# which is the behaviour under test, so the fixture moved rather than the rule.
 module Clean
 using ExperimentalAPI
 export documented
 public marked
 "documented"
 documented(x) = x
+"Marked, and still documented."
 @experimental "not settled" marked(x) = x
 end
 
@@ -80,10 +84,10 @@ end
         test_surface(Dirty)
     end
     names = failed_names(ts)
-    @test "silent_one is documented or @experimental" in names
-    @test "silent_two is documented or @experimental" in names
+    @test "silent_one has a docstring" in names
+    @test "silent_two has a docstring" in names
     @test "@experimental not_public is public" in names
-    @test "nothing unaccounted for" in names        # the summary pair fails too
+    @test "every public name has a docstring" in names   # the summary pair fails too
     # The documented name is not among the complaints.
     @test !any(occursin("documented is", n) for n in names)
     @test length(names) == 4
@@ -94,7 +98,7 @@ end
         test_surface(Dirty; skip=[:silent_one, :silent_two])
     end
     @test failed_names(ts) ==
-        Set(["@experimental not_public is public", "nothing unaccounted for"])
+        Set(["@experimental not_public is public", "every public name has a docstring"])
 end
 
 @testset "a stale skip entry fails" begin
@@ -119,7 +123,7 @@ end
     for m in (Clean, Dirty)
         local got = nothing
         ts = Test.@testset Recorder "r" begin
-            got = test_surface(m; skip=collect(audit(m).unaccounted))
+            got = test_surface(m; skip=collect(audit(m).undocumented))
         end
         @test got isa ExperimentalAPI.Audit
         @test got.mod === m

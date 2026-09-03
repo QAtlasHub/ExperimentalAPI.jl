@@ -15,7 +15,7 @@ julia> using MyPackage, ExperimentalAPI
 julia> audit(MyPackage)
 ```
 
-Two numbers matter. `unaccounted` is the backlog. `dangling` should be zero on day one, because
+Two numbers matter. `undocumented` is the backlog. `dangling` should be zero on day one, because
 there are no marks yet.
 
 ## Turn the test on with the backlog listed
@@ -44,19 +44,25 @@ means the only way the list changes is deliberately, and only downwards.
 
 ## Then, for each name, one decision
 
-For every name in the list, exactly one of two things is true, and both are cheap:
+For every name in the list, **write the docstring** — that part is not optional, and it is what
+deletes the `skip` entry. Then ask a second question: is the shape settled?
 
-- **it is settled** → write the docstring, delete the `skip` entry;
-- **it is not settled** → say so, with the reason, and delete the `skip` entry:
+- **settled** → nothing more to do;
+- **not settled** → say so, with the reason, *in addition* to the docstring:
 
 ```julia
-@experimental "reads Test's internal result tree; not dogfooded in CI" \
-    render_test_report dump_test_report load_test_dump
+@experimental(
+    "reads Test's internal result tree; not dogfooded in CI",
+    render_test_report,
+    dump_test_report,
+    load_test_dump,
+)
 ```
 
-The second is not a lesser outcome. A name that is genuinely unfinished is *better* described by
-a mark with a reason than by a docstring that has to pretend the shape is final — and it buys the
-right to change it, which the docstring does not.
+The mark is not a substitute for the prose and never was: the docstring says what the name does,
+which is owed either way. What the mark adds is the thing a docstring cannot carry — a machine
+can read it, so a run that goes through the name says so, and dropping the name later is not a
+breaking change.
 
 ## What "declare it" is worth later
 
@@ -71,4 +77,5 @@ Once the marks exist, three things follow that did not before:
 ## A note on where this ends
 
 The goal is not zero experimental names. A package with none is either finished or lying. The
-goal is zero **unaccounted** names — no public name about which nothing at all has been said.
+goal is zero **undocumented** names — every public name described, whether or not its shape has
+settled.

@@ -11,14 +11,20 @@ definition** or **a list of names**.
 
 ```julia
 # attached to the definition: the mark and the thing it describes cannot drift apart
-@experimental "signature will be wrapped once the write-back refactor settles" \
-function ingest(config; doc, kwargs...)
-    # ...
-end
+@experimental(
+    "signature will be wrapped once the write-back refactor settles",
+    function ingest(config; doc, kwargs...)
+        # ...
+    end,
+)
 
 # a list, for names an included file defines
-@experimental "reads Test's internal result tree; not dogfooded in CI" \
-    render_test_report dump_test_report load_test_dump
+@experimental(
+    "reads Test's internal result tree; not dogfooded in CI",
+    render_test_report,
+    dump_test_report,
+    load_test_dump,
+)
 ```
 
 The attached form is preferred where it fits, for the same reason a docstring goes above its
@@ -89,10 +95,12 @@ questions, and nothing forces a choice between them:
 
 Ingest `doc` into the registry described by `config`.
 """
-@experimental "signature will be wrapped once the write-back refactor settles" \
-function ingest(config; doc, kwargs...)
-    # ...
-end
+@experimental(
+    "signature will be wrapped once the write-back refactor settles",
+    function ingest(config; doc, kwargs...)
+        # ...
+    end,
+)
 ```
 
 ## Marking is not making public

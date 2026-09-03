@@ -95,7 +95,7 @@ was never made public, which is the module contradicting itself.
 | who may call a name | `export`, `public` (1.11) | orthogonal |
 | a name on its way out | `@deprecate` | opposite direction |
 | type stability | DispatchDoctor | unrelated |
-| every public name has a docstring | `Docs.undocumented_names`, `Aqua.test_undocumented_names` | the same check, plus a third answer |
+| every public name has a docstring | `Docs.undocumented_names`, `Aqua.test_undocumented_names` | the same requirement, not a looser one — plus `foreign` and `dangling` |
 | generating documentation | Documenter | only ever checks whether prose exists |
 | run-time behaviour | — | one short-circuit read in the body — see the table above |
 | how often a path ran | `Profile`, `@time` | not answered: the default layer knows *whether*, never how often |

@@ -56,3 +56,78 @@ end
     end
     @test e !== nothing
 end
+
+# ── every julia code block in the docs ───────────────────────────────────────────────────────
+#
+# Scope: a lint, not an execution. Most blocks reference a `MyPackage` that does not exist, so
+# they cannot be run — but the defect that shipped here was not a runtime one. A trailing `\`
+# used as a line continuation PARSES (Julia reads it as left-division) and fails only when the
+# macro is expanded, so neither a parse check nor a `jldoctest` would have caught it. The check
+# has to be for the character.
+
+"Every ```julia fence in `path`, as (line number, text) pairs."
+function julia_blocks(path)
+    out = Tuple{Int,String}[]
+    inblock = false
+    start = 0
+    buf = String[]
+    for (i, line) in enumerate(eachline(path))
+        l = rstrip(line, ['\r'])
+        if inblock && startswith(strip(l), "```")
+            push!(out, (start, join(buf, "\n")))
+            inblock = false
+            empty!(buf)
+        elseif inblock
+            push!(buf, l)
+        elseif strip(l) in ("```julia", "```jldoctest")
+            inblock = true
+            start = i
+        end
+    end
+    return out
+end
+
+const _DOC_SOURCES = vcat(
+    [joinpath(@__DIR__, "..", "README.md")],
+    sort(readdir(joinpath(@__DIR__, "..", "docs", "src"); join=true)),
+    sort(readdir(joinpath(@__DIR__, "..", "src"); join=true)),
+)
+
+@testset "no code block uses a trailing backslash as a line continuation" begin
+    # Julia has no line continuation. `@experimental "…" \` + a definition on the next line
+    # reaches the macro as `\(reason, def)` and dies with "nothing to mark"; the name-list form
+    # dies in `adjoint`. Both shipped, in eleven places, and survived a review round.
+    offenders = String[]
+    for path in _DOC_SOURCES
+        endswith(path, ".md") || endswith(path, ".jl") || continue
+        for (start, block) in julia_blocks(path)
+            for (k, line) in enumerate(split(block, "\n"))
+                endswith(rstrip(line), "\\") &&
+                    push!(offenders, "$(basename(path)):$(start + k)")
+            end
+        end
+    end
+    @test offenders == String[]
+end
+
+@testset "…and the check can see one" begin
+    # Control: the scanner only looks inside fences, so it has to be shown to fire on a real one.
+    path = joinpath(mktempdir(), "sample.md")
+    write(
+        path,
+        join(
+            [
+                "prose ending in a backslash \\",   # outside a fence: not a finding
+                "```julia",
+                "@experimental \"why\" \\",
+                "f(x) = x",
+                "```",
+            ],
+            "\n",
+        ),
+    )
+    blocks = julia_blocks(path)
+    @test length(blocks) == 1
+    lines = split(blocks[1][2], "\n")
+    @test count(l -> endswith(rstrip(l), "\\"), lines) == 1
+end
