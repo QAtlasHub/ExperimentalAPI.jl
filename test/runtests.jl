@@ -18,5 +18,9 @@ using Test
     include("spec/test_spec_docstring.jl")
     include("spec/test_spec_verify.jl")
     include("spec/test_spec_runtime.jl")
+    include("spec/test_spec_profile.jl")
+    include("spec/test_spec_foreign.jl")
+    include("spec/test_spec_forms.jl")
+    include("spec/test_spec_integration.jl")
     include("test_aqua.jl")
 end

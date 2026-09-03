@@ -18,8 +18,23 @@ directory is the honest progress measure.
 
 | file | concern |
 |---|---|
-| `test_spec_declare.jl`    | what can carry a mark: function, method, struct, const, module, macro, extension |
-| `test_spec_propagate.jl`  | a caller that never names a marked thing still depends on it |
-| `test_spec_docstring.jl`  | a mark and a docstring are different accounts and must coexist |
-| `test_spec_verify.jl`     | how well is a marked thing exercised by the tests |
-| `test_spec_runtime.jl`    | what a real run touched, and what it costs when nobody asks |
+| `test_spec_declare.jl`     | what can carry a mark: function, method, struct, const, module, macro, extension |
+| `test_spec_forms.jl`       | the definition forms a real package hits on its second afternoon |
+| `test_spec_foreign.jl`     | marking a method on somebody else's generic — the `QAtlas.fetch` case |
+| `test_spec_propagate.jl`   | a caller that never names a marked thing still depends on it |
+| `test_spec_docstring.jl`   | a mark and a docstring are different accounts and must coexist |
+| `test_spec_verify.jl`      | how well is a marked thing exercised by the tests |
+| `test_spec_runtime.jl`     | the floor: the mark must not wrap the call |
+| `test_spec_profile.jl`     | what a real run went through, how often, and how much of it |
+| `test_spec_integration.jl` | where the mark has to surface: docs, Aqua, releases, provenance, CI |
+
+## What the spec already found
+
+Two defects, both live in the shipped code, both of the kind the spec was written to catch —
+a mark that silently records the wrong thing rather than refusing:
+
+1. `@experimental "…" (c::C)(x) = c.k * x` marks **`:c`**, the argument name. Not the type, not
+   a function — a local that is not a binding anywhere, so the mark is silently meaningless.
+2. A mark inside a function body is refused by *Julia*, not by this package:
+   `syntax: unsupported const declaration on local variable`. The message never mentions
+   `@experimental` and points at a line the author did not write.
