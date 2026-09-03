@@ -41,6 +41,7 @@ directory is the honest progress measure.
 | `test_spec_runtime.jl`     | the floor: the mark must not wrap the call |
 | `test_spec_profile.jl`     | what a real run went through, how often, and how much of it |
 | `test_spec_dispatch.jl`    | one call site, several methods, only some marked — the branch |
+| `test_spec_lifecycle.jl`   | the mark's EXIT, and an entry point that is a module rather than a function |
 | `test_spec_integration.jl` | where the mark has to surface: docs, Aqua, releases, provenance, CI |
 
 ## What the spec already found
