@@ -8,7 +8,9 @@ using ExperimentalAPI
 using Test
 
 function readme_first_block(path=joinpath(@__DIR__, "..", "README.md"))
-    md = read(path, String)
+    # Git checks text files out with CRLF on Windows, so every fence here would miss. Same
+    # normalisation as `test_spec_table.jl`, which learned it from a red windows-latest.
+    md = replace(read(path, String), "\r\n" => "\n")
     i = findfirst("```julia\n", md)
     i === nothing && error("README.md has no ```julia block")
     rest = md[(last(i) + 1):end]
