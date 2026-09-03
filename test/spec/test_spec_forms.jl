@@ -235,6 +235,102 @@ end
     @test_broken ExperimentalAPI.audit(FormsSpec).tracking isa AbstractDict
 end
 
+# ── writing it lazily ────────────────────────────────────────────────────────────────────────
+#
+# The reason is the payload: why a name is not settled is knowledge only the author has. So the
+# interesting question is not "does the good form work" but "what happens when someone writes it
+# without one". Measured 2026-09-03: every lazy form IS refused — but two of them are refused by
+# accident, and two more are refused with a message pointing the wrong way.
+
+@testset "a bare @experimental is refused" begin
+    for ex in (
+        :(@experimental),
+        :(@experimental foo),
+        :(@experimental function f(x)
+            x
+        end),
+        :(@experimental struct S
+            v::Int
+        end),
+        :(@experimental f(x) = x),
+        :(@experimental const C = 1),
+    )
+        @testset "$(first(string(ex), 40))" begin
+            m = Module(:LazyProbe)
+            Core.eval(m, :(using ExperimentalAPI))
+            @test_throws Exception Core.eval(m, ex)
+        end
+    end
+end
+
+@testset "an empty reason is refused, and the message says why" begin
+    for r in ("", "   ", "\n\t ")
+        @testset "reason=$(repr(r))" begin
+            m = Module(:EmptyProbe)
+            Core.eval(m, :(using ExperimentalAPI))
+            e = try
+                Core.eval(m, :(@experimental $r f(x) = x))
+                nothing
+            catch err
+                err isa LoadError ? err.error : err
+            end
+            @test e isa ArgumentError
+            @test occursin("reason", sprint(showerror, e))
+        end
+    end
+end
+
+@testset "a non-string reason is refused by accident, not by a check" begin
+    # `@experimental :sym f(x) = x` and `@experimental 42 f(x) = x` both die inside `_reason`
+    # with `MethodError: no method matching strip(::Symbol)` / `strip(::Int64)`. Refused, yes —
+    # but by `strip` failing, with a message that names neither `@experimental` nor `reason`.
+    # Same shape as the `since = "0.4.0"` case above.
+    for r in (:(:sym), 42)
+        @testset "reason=$(repr(r))" begin
+            m = Module(:BadReasonProbe)
+            Core.eval(m, :(using ExperimentalAPI))
+            e = try
+                Core.eval(m, :(@experimental $r f(x) = x))
+                nothing
+            catch err
+                err isa LoadError ? err.error : err
+            end
+            @test e isa MethodError                       # today, and accidental
+            @test_broken occursin("reason", sprint(showerror, e))
+        end
+    end
+end
+
+@testset "forgetting the reason is diagnosed as a missing reason" begin
+    # `@experimental f(x) = x` is refused with "nothing to mark — give a definition or a name".
+    # The author DID give a definition; what is missing is the reason. The message points at the
+    # wrong end of the call, which is how someone ends up deleting a correct definition.
+    m = Module(:NoReasonProbe)
+    Core.eval(m, :(using ExperimentalAPI))
+    e = try
+        Core.eval(m, :(@experimental f(x) = x))
+        nothing
+    catch err
+        err isa LoadError ? err.error : err
+    end
+    @test e isa ArgumentError
+    @test occursin("nothing to mark", sprint(showerror, e))        # today, and misleading
+    @test_broken occursin("reason", sprint(showerror, e))
+end
+
+@testset "nothing is marked when the macro refuses" begin
+    # A refusal that still recorded a mark would be worse than either outcome. Checks the module
+    # is left clean, not just that an exception came out.
+    m = Module(:RefusedProbe)
+    Core.eval(m, :(using ExperimentalAPI))
+    try
+        Core.eval(m, :(@experimental f(x) = x))
+    catch
+    end
+    @test isempty(experimental(m))
+    @test !isdefined(m, :f)
+end
+
 # ── same name, two places ────────────────────────────────────────────────────────────────────
 
 @testset "the same name marked in two modules stays separate" begin

@@ -22,5 +22,6 @@ using Test
     include("spec/test_spec_foreign.jl")
     include("spec/test_spec_forms.jl")
     include("spec/test_spec_integration.jl")
+    include("spec/test_spec_dispatch.jl")
     include("test_aqua.jl")
 end
