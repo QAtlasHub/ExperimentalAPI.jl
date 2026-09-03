@@ -126,57 +126,76 @@ end
 # Folded in from what used to be `test_spec_runtime.jl`. Its other eight testsets restated this
 # file's claims on a strictly smaller fixture; only these two measured anything of their own.
 
+# The control for the two assertions below. A predicate that has never returned `true` for
+# anything is not evidence, and `!occursin(…)` is the shape most easily satisfied by an expansion
+# that dropped the definition altogether. `@wrapping` does exactly what `@experimental` must never
+# become, so the check can be shown to fire. Kept in a module because a macro defined at the top
+# level of a test file is visible to every file after it in the same shard.
+module WrapControl
+
+"A macro that wraps the call it is given — the regression this file exists to prevent."
+macro wrapping(_reason, def)
+    return esc(Expr(:function, def.args[1], Expr(:block, :(COUNTS[] += 1), def.args[2])))
+end
+
+"""
+    method_bodies(ex) -> Vector
+
+The body of every method definition inside an expanded expression, line numbers stripped. Walks
+into `Expr(:escape, …)`, which is where a macro's own output lives.
+"""
+function method_bodies(ex)
+    out = Any[]
+    walk(x) =
+        if x isa Expr
+            if (x.head === :(=) || x.head === :function) &&
+                x.args[1] isa Expr &&
+                x.args[1].head === :call
+                push!(out, x.args[2])
+            end
+            foreach(walk, x.args)
+        end
+    walk(Base.remove_linenums!(ex))
+    return out
+end
+
+end # module WrapControl
+
 @testset "the mark does not wrap the call" begin
-    # The property the package currently advertises and must keep: `@experimental` emits the
-    # definition unchanged plus one `push!` at load time. If instrumentation ever becomes
-    # unconditional, an inner loop pays for it on every iteration.
-    # Reading `src/mark.jl` for a prose phrase would pass for a regression that wrapped the call
-    # and left the sentence alone. Look at what the macro emits.
-    emitted = string(@macroexpand @experimental "why" f(x) = x)
-    @test occursin("f(x)", emitted)                # the definition is there…
-    @test !occursin("function f", replace(emitted, "f(x)" => ""))   # …and not wrapped in another
+    # The property the package advertises and must keep: `@experimental` emits the definition
+    # unchanged plus one `push!` at load time. If instrumentation ever becomes unconditional, an
+    # inner loop pays for it on every iteration.
+    #
+    # Compared at the AST, not as a string: the expansion contains `Expr(:escape, …)` and the
+    # printed forms differ even when the bodies are identical. Reading `src/mark.jl` for a prose
+    # phrase would pass for a regression that wrapped the call and left the sentence alone.
+    bare = WrapControl.method_bodies(@macroexpand f(x) = x * 2)
+    marked = WrapControl.method_bodies(@macroexpand @experimental "why" f(x) = x * 2)
+    @test length(bare) == 1
+    @test marked == bare                     # the definition is emitted untouched
+    # …and the comparison can fail, which is the half that makes the line above worth anything.
+    wrapped = WrapControl.method_bodies(
+        @macroexpand WrapControl.@wrapping "why" f(x) = x * 2
+    )
+    @test wrapped != bare
     @test Sim.driver(M, 3) ≈ 3 * (0.5 * 1.0000001 + exp(-0.5))
 end
 
-@testset "a marked definition costs the same at run time as an unmarked one" begin
-    # This was a wall-clock ratio, `a < 5b + 1e-3`, and it was wrong twice over. Measured
-    # 2026-09-03, Julia 1.12.2, idle machine:
-    #
-    #   * The two arms did different work. `a` timed `Sim.energy(Sim.Model(x))` — a struct
-    #     construction per iteration — against a bare `unmarked(x)`. The 5x margin was spent on
-    #     the fixture, not on the mark, and the test failed at a = 11.8 ms, b = 2.1 ms: a real
-    #     5.6x difference that says nothing about `@experimental`.
-    #   * Making the arms identical does not rescue it. With the same body marked and unmarked,
-    #     the ratio over eight trials ran **0.79 to 3.03**. A 5x threshold sits inside that
-    #     spread on an idle machine, let alone on a shared CI runner across three OSes.
-    #
-    # So the claim is checked where it is exact instead. `@allocated` is deterministic, and the
-    # testset above pins the same property structurally, which is the stronger of the two: it
-    # catches any wrapper, whereas a wrapper that increments a counter in a preallocated
-    # `Vector{Int}` would allocate nothing and pass this one.
-    @eval module SpeedPair
-    using ExperimentalAPI
-    public marked, unmarked
-    @experimental "identical body, marked" marked(x::Float64) = x * 1.0000001
-    unmarked(x::Float64) = x * 1.0000001
-    end
-    function loop(f, xs::Vector{Float64})
-        acc = 0.0
-        for x in xs
-            acc += f(x)
-        end
-        return acc
-    end
-    xs = collect(1.0:1.0:100_000.0)
-    loop(Main.SpeedPair.marked, xs)                  # warm both before measuring either
-    loop(Main.SpeedPair.unmarked, xs)
-    @test @allocated(loop(Main.SpeedPair.marked, xs)) ==
-        @allocated(loop(Main.SpeedPair.unmarked, xs))
-    # …and that the shared figure is zero, so the equality above is not two equal wrappers.
-    @test @allocated(loop(Main.SpeedPair.unmarked, xs)) == 0
-    # The mark is still recorded — otherwise the two arms are identical because nothing happened.
-    @test :marked in [mk.name for mk in ExperimentalAPI.experimental(Main.SpeedPair)]
-end
+# There is no run-time cost assertion here, and that is a finding rather than a gap. Three routes
+# were measured on 2026-09-03 and all three were worse than the structural check above:
+#
+#   * A wall-clock ratio, `a < 5b + 1e-3`. Its two arms did different work — `Sim.energy(
+#     Sim.Model(x))`, a struct construction per iteration, against a bare call — so the 5x margin
+#     was spent on the fixture. It failed at a = 11.8 ms against b = 2.1 ms.
+#   * The same ratio with the arms made identical (same body, one marked). Over eight trials on an
+#     idle machine the ratio ran **0.79 to 3.03**, so the threshold sat inside the noise.
+#   * `@allocated` equality between the arms. Deterministic, but it measures the wrong thing: it
+#     came back 0 on Julia 1.12 and 16 on 1.11 for the SAME code, and — decisively — a counter
+#     wrapper `push!`ing into a warmed vector also allocates 0, so the check cannot see the
+#     regression it was written to catch. The positive control is what showed that.
+#
+# The claim is exact at the expansion and only ever approximate at run time, so it is checked
+# where it is exact.
 
 # ── mechanism constraints ────────────────────────────────────────────────────────────────────
 

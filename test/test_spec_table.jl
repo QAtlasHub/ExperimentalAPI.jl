@@ -13,17 +13,21 @@ const _SPEC_README = joinpath(@__DIR__, "spec", "README.md")
 const _BEGIN = "<!-- BEGIN GENERATED: julia --project=test test/spec/summary.jl -->"
 const _END = "<!-- END GENERATED -->"
 
+# Git checks the README out with CRLF on Windows, so the comparison below is between line
+# endings unless they are normalised — measured, as a red `julia 1.12 — windows-latest`.
+_lf(s::AbstractString) = replace(s, "\r\n" => "\n")
+
 @testset "the spec table is generated, not typed" begin
-    md = read(_SPEC_README, String)
+    md = _lf(read(_SPEC_README, String))
     @test occursin(_BEGIN, md)
     @test occursin(_END, md)
     block = strip(split(split(md, _BEGIN)[2], _END)[1])
     # The failure message has to say what to do, because "a table is out of date" is not a
     # defect anybody can act on without being told where the table comes from.
-    if block != SpecSummary.table()
+    if block != _lf(SpecSummary.table())
         @info "test/spec/README.md is stale — regenerate with `julia --project=test test/spec/summary.jl`"
     end
-    @test block == SpecSummary.table()
+    @test block == _lf(SpecSummary.table())
 end
 
 @testset "no spec file is missing from the table" begin
