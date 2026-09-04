@@ -132,7 +132,9 @@ implementation to be right, because the module is disagreeing with itself.
   * **Signatures.** A name that stays present while its arguments change is invisible here.
   * **Prose quality.** A docstring exists or it does not; [`isdocumented`](@ref) reads no further.
   * **Methods on other packages' functions.** They are not in `names(m)` and never will be.
-  * **Names public only inside an extension**, which is a separate module.
+  * **Names public only inside an extension**, which is a separate module. Avoidable: declare the
+    function and its docstring in the parent and let the extension add only the method, which is
+    what this package does for [`test_surface`](@ref).
 
 See [`test_surface`](@ref) to run this as a test, and [`snapshot`](@ref) to carry the result into
 a release decision.
