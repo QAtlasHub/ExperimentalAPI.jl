@@ -76,9 +76,13 @@ function marks_markdown(m::Module)
             push!(bits, "**no exit condition recorded**")
         else
             push!(
-            bits,
-            ready_to_promote(mk) ? "**exit condition met**" : "exit condition not yet met",
-        )
+                bits,
+                if ready_to_promote(mk)
+                    "**exit condition met**"
+                else
+                    "exit condition not yet met"
+                end,
+            )
         end
         println(io, "*", join(bits, " · "), "*")
         println(io)
