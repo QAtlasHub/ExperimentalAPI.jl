@@ -57,14 +57,13 @@ const COVERED = ExperimentalAPI.coverage_enabled()
     @test COVERED == (Base.JLOptions().code_coverage != 0)
 end
 
-@testset "a marked definition with no coverage at all is reported" begin
-    if COVERED
-        @test :never_exercised in [mk.name for mk in ExperimentalAPI.unverified(Covered)]
-    else
-        # Nothing was measured, so nothing may be reported: a checker that flagged marks here
-        # would flag every mark in every package on every ordinary test run.
-        @test isempty(ExperimentalAPI.unverified(Covered))
-    end
+@testset "a marked definition the suite never entered is reported" begin
+    # Unconditional: the signal is the probe the mark already emits, not the coverage data.
+    # `--code-coverage` cannot answer this on every version — measured on 1.14.0-DEV.3115, the
+    # definition line of a method nothing ever called now carries a counter, so a one-line
+    # definition reads as fully covered on the strength of having been defined.
+    @test :never_exercised in [mk.name for mk in ExperimentalAPI.unverified(Covered)]
+    @test ExperimentalAPI.coverage(Covered, :never_exercised) == 0.0
 end
 
 @testset "a marked definition that IS covered is not reported" begin

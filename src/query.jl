@@ -203,6 +203,19 @@ function _search_modules(m::Method)
     return (m.module, id.mod)
 end
 
+# The `X` in `Type{X}` — what a constructor call dispatches on — or `nothing`.
+function _constructed_type(@nospecialize(ft))
+    (ft isa Type && ft <: Type && ft !== Type) || return nothing
+    ps = try
+        Base.unwrap_unionall(ft).parameters
+    catch
+        return nothing
+    end
+    length(ps) == 1 || return nothing
+    p = ps[1]
+    return (p isa TypeVar || p isa Union) ? nothing : p
+end
+
 # The function type a signature dispatches on: `Tuple{typeof(f), Int}` -> `typeof(f)`.
 function _sig_ftype(@nospecialize(sig))
     s = Base.unwrap_unionall(sig)
@@ -213,9 +226,10 @@ end
 # Who a function type belongs to, in the vocabulary a mark is written in.
 function _ftype_identity(@nospecialize(ft))
     ft === nothing && return nothing
-    if ft isa DataType && ft <: Type && length(ft.parameters) == 1
-        t = ft.parameters[1]
-        t isa Union && return nothing
+    # Not `ft isa DataType && ft <: Type`: on 1.14-DEV `Type{X}` is not a `DataType`, and that
+    # spelling silently stopped recognising every constructor.
+    t = _constructed_type(ft)
+    if t !== nothing
         b = Base.unwrap_unionall(t)
         b isa DataType || return nothing
         return (mod=parentmodule(b), name=nameof(b), constructor=true)

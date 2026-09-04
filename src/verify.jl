@@ -18,16 +18,18 @@ How much of one marked definition the current run exercised.
 |---|---|
 | `mark` | the declaration |
 | `covered`, `total` | executable lines run, and executable lines in the definition |
-| `fraction` | `covered / total`, `0.0` for a definition that was never compiled, or `missing` |
+| `fraction` | `covered / total`, `0.0` for a definition the run never entered, or `missing` |
 
-`missing` is not zero. A run without `--code-coverage` has nothing to say about coverage, and
-reporting `0.0` there would flag every marked definition in every ordinary run.
+`missing` is not zero. A run without `--code-coverage` has nothing to say about *how much* of a
+definition ran, and reporting `0.0` there would flag every marked definition in every ordinary run.
 
-`total == 0` with `fraction == 0.0` is the strongest form of unverified: coverage was on, the mark
-attached to a definition with a body, and that definition produced **no counters at all**. Julia
-instruments a line when it generates code for it, so a method nothing ever called leaves no trace
-in the coverage data — an absence that reads identically to "not executable" unless you also know
-there was code there to execute.
+Whether it ran **at all** is a different question, and this package already answers it exactly:
+the probe. A marked definition whose flag never fired is `0.0` whatever the line counters say —
+which is not a refinement but a correction. Measured on 1.14.0-DEV.3115: `--code-coverage` now
+emits a counter for the *definition* line of a method nothing ever called, so a one-line
+definition comes back "fully covered" on the strength of having been defined. Up to 1.12 that line
+had no counter at all, so the two versions disagree about the same file, and only one of them can
+be read as "the suite ran this".
 """
 struct Verification
     mark::Mark
@@ -90,8 +92,11 @@ end
 The marks whose definitions this run never executed at all.
 
 The worst case, and the one worth a separate verb: code that is both unvalidated and untested.
-Empty when the run has no coverage data — a run that measured nothing found nothing, and saying
-otherwise would report every mark in the package on every ordinary test run.
+
+Does **not** need `--code-coverage`. The signal is the probe the mark already emits, which is
+exact and costs nothing; coverage adds the partial fraction, which is a different question.
+A mark on a `struct`, a `const` or a name list carries no probe and is not listed — there is
+nothing to enter.
 """
 function unverified(m::Module)
     return [v.mark for v in verification(m) if v.fraction !== missing && v.fraction == 0.0]
@@ -122,6 +127,10 @@ function stale_marks(m::Module)
 end
 
 function _verify(mk::Mark, data)
+    # The probe first, and it overrides. It is the exact answer to "was this entered", it needs no
+    # coverage run, and on 1.14-DEV it is the only one of the two signals that is still right:
+    # a definition line now carries a counter whether or not anything ever called the method.
+    _entered_flag(mk) === false && return Verification(mk, 0, 0, 0.0)
     span = _definition_span(mk)
     (span === nothing || data === nothing) && return Verification(mk, 0, 0, missing)
     counts = get(data, _realpath(String(mk.file)), Dict{Int,Int}())
@@ -134,11 +143,18 @@ function _verify(mk::Mark, data)
         c > 0 && (covered += 1)
     end
     total > 0 && return Verification(mk, covered, total, covered / total)
-    # No counters anywhere in the span. For a mark that attached to a definition with a body that
-    # is a fact, not a gap: the body had lines to instrument and Julia instruments a line when it
-    # generates code for it, so their absence says nothing ever called it. A mark on a `struct`, a
-    # `const` or a name list has no body, and for those there is genuinely nothing to measure.
+    # No counters anywhere in the span. Up to 1.12 that is itself the answer for a definition with
+    # a body — Julia instruments a line when it generates code for it, so their absence says
+    # nothing ever called it. A mark on a `struct`, a `const` or a name list has no body, and for
+    # those there is genuinely nothing to measure.
     return Verification(mk, 0, 0, mk.sig === nothing ? missing : 0.0)
+end
+
+# `true`, `false`, or `nothing` when the mark carries no probe — a name list, a `struct`, a
+# `const`, a `macro`, a `@generated` function.
+function _entered_flag(mk::Mark)
+    p = _flag(mk.mod, mk.name)
+    return p === nothing ? nothing : p[]
 end
 
 # The line range one declaration occupies: from the `@experimental` line to just before the next

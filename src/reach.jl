@@ -655,10 +655,10 @@ function _argtype(ci, @nospecialize(x))
     x isa Core.Argument && return _widen(_slottype(ci, x.n))
     x isa Core.SlotNumber && return _widen(_slottype(ci, x.id))
     x isa GlobalRef && return _widen(_globaltype(x))
-    x isa QuoteNode && return Core.Typeof(x.value)
+    x isa QuoteNode && return _norm_type(Core.Typeof(x.value))
     x isa Expr && return Any
     x isa Type && return Type{x}
-    return Core.Typeof(x)
+    return _norm_type(Core.Typeof(x))
 end
 
 function _ssatype(ci, i::Int)
@@ -681,14 +681,14 @@ function _globaltype(g::GlobalRef)
     catch
         return Any
     end
-    return Core.Typeof(v)
+    return _norm_type(Core.Typeof(v))
 end
 
 # The lattice elements inference hands back are not all types. Anything not understood widens to
 # `Any`, which turns into an unresolved call site rather than a wrong resolution.
 function _widen(@nospecialize(t))
-    t isa Type && return t
-    t isa Core.Const && return Core.Typeof(t.val)
+    t isa Type && return _norm_type(t)
+    t isa Core.Const && return _norm_type(Core.Typeof(t.val))
     if t isa Core.PartialStruct
         u = t.typ
         u isa Type && return u
@@ -755,17 +755,41 @@ end
 # Whether a type can be the first parameter of a signature that dispatch could pin. `Function`
 # and `Any` cannot: they are the shapes a field read or a table lookup produces.
 #
-# `Type{Float64}` is the exception the flag alone gets wrong. Julia marks it abstract, but a
-# constant type in call position is a constructor call and dispatch pins it exactly.
+# `Type{Float64}` is the exception the abstractness flag alone gets wrong. Julia marks it abstract,
+# but a constant type in call position is a constructor call and dispatch pins it exactly.
 function _is_callable_type(@nospecialize(ft))
     ft === Any && return false
     ft === Function && return false
+    ft isa Type || return false
+    _type_parameter(ft) === nothing || return true
     ft isa DataType || return false
-    if ft <: Type
-        return length(ft.parameters) == 1 && !(ft.parameters[1] isa TypeVar)
-    end
     isabstracttype(ft) && return false
     return true
+end
+
+# The `X` in `Type{X}`, or `nothing` if `t` is not a constant type.
+#
+# Spelled as a question about `t` rather than as `t isa DataType && t <: Type`, because both halves
+# of that moved: on 1.14-DEV `Type{X}` is no longer a `DataType`, and `Core.Typeof(Float64)`
+# returns the new `Core.TypeEgal{Float64}` rather than `Type{Float64}`. Measured on
+# 1.14.0-DEV.3115; the old spelling made every constructor call in the graph `:unknown`, which
+# reported four otherwise-clean fixtures as unresolved.
+function _type_parameter(@nospecialize(t))
+    (t isa Type && t <: Type && t !== Type) || return nothing
+    ps = try
+        Base.unwrap_unionall(t).parameters
+    catch
+        return nothing
+    end
+    length(ps) == 1 || return nothing
+    p = ps[1]
+    return p isa TypeVar ? nothing : p
+end
+
+# `Type{X}` in the spelling the rest of this file and every method signature uses.
+function _norm_type(@nospecialize(t))
+    p = _type_parameter(t)
+    return p === nothing ? t : Type{p}
 end
 
 # The element types a splatted argument contributes, or `nothing` if its arity is not known.
