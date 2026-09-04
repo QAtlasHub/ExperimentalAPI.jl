@@ -58,7 +58,8 @@ A read, plus one write on the first call:
 flag is written once and only read afterwards, so it stops dirtying the cache line — which is why
 it is free at eight threads while every counting scheme is not, and why the notice is a summary at
 exit rather than a warning at the call. Counting, call sites and paths are a separate, opt-in
-layer that is not built yet.
+layer — `record`, below — and it reaches the same statement from the other side rather than
+emitting anything more.
 
 Only a definition **with a body** carries a flag — `function`, `f(x) = …`, parametric and
 return-type-annotated signatures alike. A mark written as a name list, or attached to a struct, a
@@ -144,9 +145,55 @@ and the two accounts answer different questions.
 ```julia
 experimental(MyPackage)              # Vector{Mark}, sorted — the reason travels with the name
 isexperimental(MyPackage, :foo)      # the one-bit form
+isexperimental(which(fetch, Tuple{Heisenberg,Energy}))   # …and at method granularity
 stable(MyPackage)                    # the complement: what you cannot change quietly
 audit(MyPackage)                     # the check, as data
 ```
+
+## Counting, paths and time
+
+Detection is on by default and costs nothing. How *often*, by which paths, and how much of the run
+is a separate layer, and it is a call rather than a default for exactly that reason:
+
+```julia
+r = record() do
+    simulate(model; steps = 10_000)
+end
+```
+
+```julia
+julia> r
+Record — 1 marked definition entered in 0.42s
+  MyModel.energy  ×10000 — convergence not established below β ≈ 0.1
+     inclusive 0.31s   exclusive 0.28s
+     via record → sweep → step → energy
+  recorder overhead ≈ 4.1%
+```
+
+The emitted statement never changes. Opening a block clears every flag, so the short-circuit fails
+and the *write* side — a function call, not an inlined store — does the counting. Counts are
+therefore exact and survive inlining, which is what ruled out a sampling profiler: a definition
+small enough to be worth marking is small enough to be inlined, and a sampler has no frame left to
+attribute to.
+
+`assert_clean(f)` turns the same machinery into a refusal, and `stamp(path, f)` writes it next to
+the result it produced, in plain TOML — a year later the package may not resolve, and a provenance
+record nobody can open is not one.
+
+## What a caller depends on without naming it
+
+```julia
+julia> verdict(reach(analyse, Tuple{Model,Float64}))
+:depends
+```
+
+Modelled on Lean's `sorry`: a proof that uses one is not a proof, however many layers down it
+sits. Julia's call graph is not closed, so the answer is three-valued — `:depends`, `:clean`, and
+`:unknown` for a call site that could not be pinned to a method.
+
+That third answer is the point. `h.f(x)` where `h.f::Function`, and `TABLE[i](x)`, really can
+reach a marked function while being statically invisible. Reporting `:clean` there is not a weaker
+claim, it is a false one.
 
 ## Release decisions
 
@@ -169,6 +216,11 @@ promise withdrawn is a change to what callers were told.
 > **Names, not signatures.** `compare` reads name sets. A name present in both snapshots whose
 > arguments changed is a breaking change it cannot see. Read the diff as a floor on breakage,
 > never as a clearance.
+
+`compare_methods` is the finer instrument: the snapshot also carries `stable_methods` and
+`experimental_methods`, keyed by a signature a human can read in a committed file, and that key
+carries the keyword **names** a method declares. Keyword *defaults* live in the body and stay
+invisible — stated as a constant rather than left to be discovered.
 
 ## Why this cannot be a feature of Aqua
 
@@ -207,6 +259,8 @@ public, which is the module contradicting itself and needs no reference to be wr
 | every public name has a docstring | `Docs.undocumented_names` (Base 1.11+), `Aqua.test_undocumented_names` | the same requirement, not a looser one — plus `foreign` and `dangling` |
 | generating documentation | Documenter | only ever checks whether prose exists |
 | run-time behaviour | — | one short-circuit read in the body; see the table above |
+| how often a path ran | `Profile`, `@time` | `record`, opt-in — the default layer knows *whether*, never how often |
+| what a caller depends on | — | `reach`, statically, with `:unknown` as an honest third answer |
 
 ## What the audit cannot see
 
@@ -215,18 +269,30 @@ reads as if it had none:
 
 - **Signatures.** A public name whose arguments change under it is invisible.
 - **Prose quality.** A docstring reading `TODO` counts as documented.
-- **Methods on other packages' functions.** They are not in `names(m)`.
+- **Methods on other packages' functions** are not in `names(m)`, which is why the audit has a
+  second half: `contributed_methods` finds them and `unaccounted_methods` reports the ones with
+  neither a docstring nor a mark. For a package whose surface *is* such methods, a clean name
+  audit reports nothing while having looked at none of them.
 - **Names public only inside an extension**, which is a separate module.
 - **Whether a name appears in your guide, README or docs site.** Docstring presence is not
   documentation-page presence, and those two gaps are usually different sets.
 
-## Where this is going
+## The specification
 
-`test/spec/` is the specification for the rest: the propagation, profiling and lifecycle work is
-written there as tests before it is implemented, so it cannot drift from the code. Most of it is
-`@test_broken` today, and [`test/spec/README.md`](test/spec/README.md) explains why that register
-was chosen, which of the negative controls are actually running, and the two defects the exercise
-already found in the shipped code.
+`test/spec/` is the specification, written as tests before the implementation so it could not
+drift from the code — 176 behaviours across ten files, all of them live assertions now.
+[`test/spec/README.md`](test/spec/README.md) explains why `@test_broken` was the right register
+while they were being filled in, why it is a ratchet now that the count is zero, which negative
+control each group has, the two requirements that were **withdrawn** and why one of them could not
+be met, and the four defects the exercise found in the shipped code.
+
+## What is not answered
+
+- **Prose quality**, and whether a name appears anywhere but a docstring.
+- **Behaviour compatibility.** A signature that stayed put while its meaning moved.
+- **Sound analysis past a dynamic call** — that is what `:unknown` is for.
+- **Coverage without `--code-coverage`.** `coverage` answers `missing`, never `0.0`: a run that
+  measured nothing found nothing, and zero would say the opposite.
 
 ## License
 

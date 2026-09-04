@@ -24,6 +24,7 @@ public Exact,
     via_abstract,
     via_invoke,
     more_specific,
+    imperative,
     pair,
     via_pair_clean,
     via_pair_marked
@@ -67,6 +68,12 @@ via_pair_marked(a::Numerical, b::Numerical) = pair(a, b)
 more_specific(::Int) = 0
 @experimental "the fallback is a placeholder" more_specific(::Integer) = 1
 
+# Definitions the macro cannot attach to: `@eval` in a loop is the shape a table-driven package
+# has, and it is why `mark_method!` exists at all.
+for T in (:Exact, :Numerical)
+    @eval imperative(::$T) = 1.0
+end
+
 end # module Dispatch
 
 # ── the fixture really has the shape the file claims ─────────────────────────────────────────
@@ -82,7 +89,7 @@ end # module Dispatch
 end
 
 @testset "the specificity premise the file rests on is true" begin
-    # The premise every `@test_broken` below rests on, and which nothing else would notice.
+    # The premise every verdict below rests on, and which nothing else would notice.
     @test which(Dispatch.more_specific, Tuple{Int}).sig ===
         Tuple{typeof(Dispatch.more_specific),Int}
     @test Dispatch.more_specific(5) == 0            # the UNMARKED, more specific method
@@ -111,26 +118,45 @@ end
     end
 end
 
-@testset "attaching the mark at one method's definition marks the NAME today" begin
-    # The attached form reads as if it scoped the claim to one method; `_signame` throws the
-    # argument types away. So method-level marking needs a separate imperative route.
+@testset "the attached mark names the name AND the signature it attached to" begin
+    # Both statements are true of one record, and they answer different questions. `audit` asks
+    # about the name — has the author said anything about `energy`? `reach` asks about the
+    # method — is THIS dispatch path the unvalidated one?
     @test isexperimental(Dispatch, :energy)
-    @test mark(Dispatch, :energy).name === :energy         # not a signature
-    @test_broken ExperimentalAPI.mark_method! isa Function
+    @test mark(Dispatch, :energy).name === :energy
+    @test mark(Dispatch, :energy).sig === Tuple{typeof(Dispatch.energy),Dispatch.Numerical}
+    @test ExperimentalAPI.isexperimental(which(Dispatch.energy, Tuple{Dispatch.Numerical}))
+    # Control: the sibling method is not marked, so the name-level answer is the wider one.
+    @test !ExperimentalAPI.isexperimental(which(Dispatch.energy, Tuple{Dispatch.Exact}))
+end
+
+@testset "a method the macro could not reach can be marked imperatively" begin
+    # The route for a definition produced by another package's macro, or generated in a loop.
+    # The mark lands in the module that WROTE the method, exactly where the macro would put it.
+    @test ExperimentalAPI.mark_method! isa Function
+    m = which(Dispatch.imperative, Tuple{Dispatch.Numerical})
+    @test !ExperimentalAPI.isexperimental(m)              # …before
+    mk = ExperimentalAPI.mark_method!(m, "generated in a loop; shape not settled")
+    @test mk isa ExperimentalAPI.Mark
+    @test mk.mod === Dispatch
+    @test mk.sig === m.sig
+    @test ExperimentalAPI.isexperimental(m)               # …and after
+    # Control: the sibling produced by the same loop is untouched.
+    @test !ExperimentalAPI.isexperimental(which(Dispatch.imperative, Tuple{Dispatch.Exact}))
 end
 
 # ── what the analysis has to say about each shape ────────────────────────────────────────────
 
 @testset "a call site that can only reach settled methods is clean" begin
     # Control: rejects a tool answering `:depends` for every multi-candidate call site.
-    @test_broken ExperimentalAPI.verdict(
+    @test ExperimentalAPI.verdict(
         ExperimentalAPI.reach(Dispatch.only_settled, Tuple{Dispatch.Exact})
     ) === :clean
 end
 
 @testset "a Union-typed call site that could reach a mark is not clean" begin
     # Half the run-time values take the marked branch, so `:clean` is false, not conservative.
-    @test_broken ExperimentalAPI.verdict(
+    @test ExperimentalAPI.verdict(
         ExperimentalAPI.reach(
             Dispatch.either_way, Tuple{Union{Dispatch.Exact,Dispatch.Numerical}}
         ),
@@ -138,18 +164,18 @@ end
 end
 
 @testset "an abstract-typed call site that could reach a mark is not clean" begin
-    @test_broken ExperimentalAPI.verdict(
+    @test ExperimentalAPI.verdict(
         ExperimentalAPI.reach(Dispatch.via_abstract, Tuple{Dispatch.Kind})
     ) !== :clean
 end
 
 @testset "the unresolvable call site is named, not just counted" begin
     # Structured fields, not `occursin`: a short needle matches any boilerplate diagnostic.
-    @test_broken all(
+    @test all(
         u -> hasproperty(u, :file) && hasproperty(u, :line) && hasproperty(u, :callee),
         ExperimentalAPI.reach(Dispatch.via_abstract, Tuple{Dispatch.Kind}).unresolved,
     )
-    @test_broken any(
+    @test any(
         u -> u.callee === :k,
         ExperimentalAPI.reach(Dispatch.via_abstract, Tuple{Dispatch.Kind}).unresolved,
     )
@@ -158,7 +184,7 @@ end
 @testset "which() throwing must not be swallowed into :clean" begin
     # The mistake this file exists to prevent: catching `which`, skipping the site, reporting
     # the rest as clean.
-    @test_broken ExperimentalAPI.verdict(
+    @test ExperimentalAPI.verdict(
         ExperimentalAPI.reach(Dispatch.via_abstract, Tuple{Dispatch.Kind})
     ) === :unknown
 end
@@ -166,27 +192,35 @@ end
 # ── dispatch subtleties ──────────────────────────────────────────────────────────────────────
 
 @testset "invoke pins the method it names" begin
-    # Argument types alone cannot see `invoke` pinning a method dispatch would not pick.
-    @test_broken ExperimentalAPI.verdict(
-        ExperimentalAPI.reach(Dispatch.via_invoke, Tuple{Dispatch.Numerical})
+    # Argument types alone cannot see `invoke` pinning a method dispatch would not pick: an `Int`
+    # goes to the unmarked `::Int` method, and only `invoke` reaches the marked `::Integer` one.
+    # The entry signature is `Tuple{Int}` because that is the only method `via_invoke` has —
+    # the spec was written with `Tuple{Numerical}`, which no method of it matches.
+    @test ExperimentalAPI.verdict(
+        ExperimentalAPI.reach(Dispatch.via_invoke, Tuple{Int})
     ) === :depends
+    # Control: the same argument reaching the same generic WITHOUT `invoke` is clean, so the
+    # verdict above is `invoke` being followed and not the argument type being widened.
+    @test ExperimentalAPI.verdict(
+        ExperimentalAPI.reach(Dispatch.more_specific, Tuple{Int})
+    ) === :clean
 end
 
 @testset "a more specific unmarked method shadows a marked one" begin
     # An `Int` never reaches the mark. `:depends` here is the name-level over-claim one level
     # down.
-    @test_broken ExperimentalAPI.verdict(
+    @test ExperimentalAPI.verdict(
         ExperimentalAPI.reach(Dispatch.more_specific, Tuple{Int})
     ) === :clean
     # …and the call that does fall through is reported.
-    @test_broken ExperimentalAPI.verdict(
+    @test ExperimentalAPI.verdict(
         ExperimentalAPI.reach(Dispatch.more_specific, Tuple{UInt8})
     ) === :depends
 end
 
 @testset "a mark on one method does not leak to its siblings at a call site" begin
     # Both call the same name and must get different verdicts.
-    @test_broken ExperimentalAPI.verdict(
+    @test ExperimentalAPI.verdict(
         ExperimentalAPI.reach(Dispatch.only_settled, Tuple{Dispatch.Exact})
     ) !== ExperimentalAPI.verdict(
         ExperimentalAPI.reach(
@@ -197,10 +231,10 @@ end
 
 @testset "a marked combination is not reachable from either argument alone" begin
     # Widening each argument independently would call both call sites `:depends`.
-    @test_broken ExperimentalAPI.verdict(
+    @test ExperimentalAPI.verdict(
         ExperimentalAPI.reach(Dispatch.via_pair_clean, Tuple{Dispatch.Exact,Dispatch.Exact})
     ) === :clean
-    @test_broken ExperimentalAPI.verdict(
+    @test ExperimentalAPI.verdict(
         ExperimentalAPI.reach(
             Dispatch.via_pair_marked, Tuple{Dispatch.Numerical,Dispatch.Numerical}
         ),
@@ -208,7 +242,7 @@ end
 end
 
 @testset "the report says WHICH method was reached, not which name" begin
-    @test_broken first(
+    @test first(
         ExperimentalAPI.reach(Dispatch.either_way, Tuple{Dispatch.Numerical}).reached
     ).method === which(Dispatch.energy, Tuple{Dispatch.Numerical})
 end

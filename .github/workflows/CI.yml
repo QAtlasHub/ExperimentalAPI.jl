@@ -1,10 +1,12 @@
 name: CI
 
-# A version matrix rather than a shard matrix, deliberately. This suite runs in about half a
-# minute, so splitting it would cost more setup than it saves — but the mechanism it tests sits
-# directly on three things the language has been moving under it: the `public` keyword (1.11),
-# `names()` reporting public names, and 1.12's rule about reading a binding created in the same
-# world age. Which Julia this runs on is the variable that actually finds bugs here.
+# A version matrix rather than a shard matrix, deliberately. This suite runs in about three
+# minutes with coverage on — measured 2026-09-04, 977 assertions — so splitting it would still
+# cost more setup than it saves. The mechanism it tests sits directly on things the language has
+# been moving under it: the `public` keyword (1.11), `names()` reporting public names, 1.12's rule
+# about reading a binding created in the same world age, and the compiler internals `reach` walks
+# (`CodeInfo.codelocs` on 1.11 became `debuginfo` on 1.12). Which Julia this runs on is the
+# variable that actually finds bugs here.
 #
 # `test/test_precompile.jl` spawns its own subprocesses with `--depwarn=error`, so the deprecation
 # that would precede a hard failure on the next Julia fails the job rather than scrolling past.

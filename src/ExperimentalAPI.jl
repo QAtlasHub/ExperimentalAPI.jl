@@ -15,34 +15,36 @@ using ExperimentalAPI
 @experimental "convergence not established below β ≈ 0.1" energy(m::Model) = m.β * correction(m)
 ```
 
-The mark is three things, and the first is the reason to have it:
-
-  * an **observation** — [`entered`](@ref) reports the marked definitions this run actually went
-    through, and a summary says so at process exit whether or not anyone asked;
-  * a **declaration** — the reason travels with the name, in the source, where the author is;
-  * a **check** — [`audit`](@ref) reports every public name with no docstring, marked or not, so
-    "every public name is described" becomes a test that fails.
-
-# What it costs
-
-One short-circuit read in the body, and a write on the first call only: measured at 1.03x on one
-thread and 0.985x on eight, for 10M calls of a numeric body. A flag written once and read
-thereafter stops dirtying the cache line, which a counter (3.76x at eight threads, and losing 40%
-of its increments to races unless atomic) does not. Counting, call sites and paths are a separate
-layer that is not built yet.
-
-Only a definition **with a body** carries a flag. A mark written as a name list, or attached to a
-struct, a const or a module, is a declaration — queryable, audited, but not observed at run time.
-See [`@experimental`](@ref) for the form-by-form table.
-
-# The three questions this answers
+# The five questions this answers
 
 | question | the call |
 |---|---|
-| did this run go through unvalidated code? | `entered()` — and the summary at exit says so anyway |
-| what is unfinished here? | `experimental(M)` |
-| which public names are undescribed? | `audit(M).undocumented` — should be empty |
+| did **this run** go through unvalidated code? | `entered()` — and the summary at exit says so anyway |
+| how often, by which paths, and how much of the run? | `record(f)` |
+| does this caller **depend** on something unvalidated, without naming it? | `reach(f, Tuple{…})` |
+| what is unfinished here, and which public names are undescribed? | `experimental(M)`, `audit(M)` |
 | is dropping this name breaking? | `compare(old_snapshot, M)` — see [`isbreaking`](@ref) |
+
+The first is the reason to have any of it. It is asked *after* a run, *about* the run, by somebody
+who is not the author — which is exactly the question a docstring is structurally unable to answer.
+
+# Three layers, and what each costs
+
+  * **Detection** is on always and costs one short-circuit read in the body: measured at `1.03x` on
+    one thread and `0.985x` on eight, for 10M calls of a numeric body — see
+    [`overhead_when_detecting`](@ref). A flag written once and read thereafter stops dirtying its
+    cache line, which a counter (3.76x at eight threads, and losing 40% of its increments to races
+    unless atomic) does not.
+  * **Recording** ([`record`](@ref)) counts, captures call paths and attributes time. It costs
+    something, which is why it is a call and not a default, and each record reports its own
+    overhead.
+  * **Analysis** ([`reach`](@ref)) is static and answers about code rather than about a run. Its
+    answer is three-valued: `:depends`, `:clean`, and `:unknown` for a call site it could not pin
+    to a method. Reporting `:unknown` as `:clean` is not a weaker claim, it is a false one.
+
+Only a definition **with a body** carries a flag. A mark written as a name list, or attached to a
+struct, a const or a module, is a declaration — queryable, audited and analysable, but not observed
+at run time. See [`@experimental`](@ref) for the form-by-form table.
 
 # What this is not
 
@@ -50,18 +52,19 @@ See [`@experimental`](@ref) for the form-by-form table.
     public and experimental, or public and settled; those are independent axes.
   * **Not deprecation.** `@deprecate` points the other way — a settled name on its way out.
   * **Not type stability.** Unrelated axis, different tooling.
-  * **Not instrumentation.** The body gains one short-circuit read, nothing more: no counter, no
-    logging call, no allocation. What it can answer is "was this entered at all", never how often.
-  * **Not a documentation generator.** The prose belongs to the author; this only ever checks
-    whether prose exists.
+  * **Not a documentation generator.** The prose belongs to the author; [`audit`](@ref) only ever
+    checks whether prose exists, never whether it is any good.
 
 # Scope of the check
 
 [`audit`](@ref) compares `names(M)` — exported *and* `public` names — against two independent
 accounts: a docstring, and a mark. They are not alternatives; the docstring is owed either way.
-It sees **names**, not signatures and not prose quality. A public name with a docstring reading
-"TODO" is accounted for; a settled name whose method signature changed under it is invisible here.
-See [`compare`](@ref) for the same limit on the release side.
+Because `names(M)` cannot see a method a package contributed to somebody else's generic, the audit
+also reports [`contributed_methods`](@ref) — for a package whose surface *is* such methods, a clean
+name audit reports nothing while covering nothing.
+
+See [`compare`](@ref) for the same limit on the release side, and [`compare_methods`](@ref) for the
+finer unit.
 """
 module ExperimentalAPI
 
@@ -69,24 +72,60 @@ using TOML
 
 export @experimental
 
-public Mark, Audit, Diff
-public experimental, isexperimental, mark, isdocumented
-public Entry, entered, marked_modules, detecting, summary_text
-public surface, stable, audit
-public snapshot, read_snapshot, write_snapshot, compare, isbreaking
-public test_surface
+# Declaring
+public Mark, mark, marks, marks_on, mark_method!, isexperimental, isnamewide
+public experimental, experimental_methods, superseded_marks, marks_without_exit
 
-include("mark.jl")      # the Mark record, the per-module registry, and @experimental
-include("detect.jl")    # which marked definitions a run entered, and the summary at exit
-include("query.jl")     # reading a module's marks back out
-include("audit.jl")     # the public surface, and the names neither account covers
-include("release.jl")   # a snapshot of the covenant, and what a diff of two of them means
+# Observing — what a run went through
+public Probe, Entry, entered, marked_modules, probes, detecting, summary_text
+public overhead_when_detecting
+public Hit, Record, Attribution, TimingBackend, timing_backend
+public record, recording, merge_records, attribute, experimental_fraction
+public write_record, read_record, assert_clean
+
+# Analysing — what code could reach
+public Reach,
+    Reached, Unresolved, reach, reach_script, verdict, isclean, combine, dependents
+
+# Checking — the public surface, and the methods no name-level check can see
+public Audit, audit, surface, stable, stable_methods, isdocumented, package_extensions
+public own_methods, contributed_methods, unaccounted_methods, partition_holds
+public extends_base
+public aqua_compatible_names, test_surface
+
+# Verifying — how well the tests exercise what is marked
+public Verification, verification, coverage, coverage_enabled, unverified, stale_marks
+public flush_coverage
+
+# Retiring — when a mark may go
+public ready_to_promote, promotable, age, stale_since, exceeds_mark_cap
+
+# Releasing
+public Diff, MethodDiff, snapshot, read_snapshot, write_snapshot
+public compare, compare_methods, compare_methods_sees_keywords, isbreaking
+public stamp, stamp_versions
+
+# Documenting
+public docstring_note, marks_markdown
+
+include("mark.jl")       # the Mark record, the per-module registry, and @experimental
+include("detect.jl")     # the probe, which marked definitions a run entered, the exit summary
+include("query.jl")      # reading a module's marks back out, by name and by method
+include("audit.jl")      # the public surface, and the names and methods neither account covers
+include("reach.jl")      # what a caller depends on without naming it
+include("record.jl")     # the opt-in layer: counts, call paths, and how much of the run
+include("verify.jl")     # how well the tests exercise what is marked
+include("lifecycle.jl")  # the mark's exit
+include("docsnote.jl")   # the mark, in the rendered documentation
+include("release.jl")    # a snapshot of the covenant, and what a diff of two of them means
 
 """
-    test_surface(m::Module; skip = Symbol[], outputlevel::Int = 0) -> Audit
+    test_surface(m::Module; skip = Symbol[], require_tracking = false, max_marks = nothing,
+                 methods = true, outputlevel = 0) -> Audit
 
-Assert, as a `@testset`, that every public name of `m` has a **docstring** — and that every mark
-applies to a name that is actually public.
+Assert, as a `@testset`, that every public name of `m` has a **docstring**, that every mark applies
+to a name that is actually public, and that every method `m` contributed to another module's
+generic is accounted for.
 
 A mark is not an alternative to prose. `@experimental` records that a shape is unsettled, which is
 never a reason to say nothing about what the name does, so a marked-but-undocumented name fails
@@ -102,9 +141,12 @@ using MyPackage, ExperimentalAPI, Test
 ExperimentalAPI.test_surface(MyPackage)
 ```
 
-`skip` is for adopting this on a package that already has a backlog: the listed names are allowed
-to have no docstring. **A stale entry fails the test** — a name in `skip` that has since been
-documented or removed is reported, so the list can only shrink.
+| keyword | |
+|---|---|
+| `skip` | names allowed to have no docstring. **A stale entry fails** — a name that has since been documented or removed is reported, so the list can only shrink |
+| `require_tracking` | every mark must say where its shape is being decided |
+| `max_marks` | the ratchet: a number in the repository that can be lowered and not raised |
+| `methods` | run the method-level half, which is the expensive one |
 
 Returns the [`Audit`](@ref) on the normal return path whether the testset passed or not.
 `outputlevel ≥ 1` also prints it.

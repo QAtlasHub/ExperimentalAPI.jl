@@ -17,10 +17,15 @@ makedocs(;
         "Home" => "index.md",
         "Declaring" => "declaring.md",
         "Observing" => "observing.md",
+        "Analysing" => "analysing.md",
         "Checking" => "checking.md",
         "Release decisions" => "releases.md",
         "Adopting it" => "adopting.md",
-        "API" => "api.md",
+        "API" => [
+            "Declaring" => "api.md",
+            "Observing and analysing" => "api-runtime.md",
+            "Checking and releasing" => "api-checks.md",
+        ],
     ],
 )
 

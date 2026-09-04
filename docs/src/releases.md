@@ -64,5 +64,62 @@ names, and "compatible" is not a set operation), and a tool that answered it app
 be worse than one that declines: a green light nobody should have trusted.
 
 Which is also why the snapshot layer of this package is itself declared
-[`@experimental`](@ref). The file format above is a guess, and making it signature-aware would
-change it.
+[`@experimental`](@ref). The file format above was a guess, and making it signature-aware changed
+it.
+
+## The method-level half
+
+The snapshot carries two more keys, and [`compare_methods`](@ref) reads them:
+
+```toml
+stable_methods = ["adapt(::Model, ::Grid)", "measure(::Model)"]
+
+[experimental_methods."fetch_value(::Heisenberg, ::Energy)"]
+reason = "extrapolated from a finite-size sweep; no reference value"
+```
+
+The key is a signature a human can read in a committed file, and it carries the argument types
+and the keyword **names** — so a method whose arguments or keywords changed reads as one key
+removed and another added, and [`isbreaking`](@ref) says so. That closes most of the blind spot
+above. What stays open is stated as a constant rather than left to be discovered:
+[`compare_methods_sees_keywords`](@ref) is `true` for names and the docstring says defaults are
+invisible, because a default lives in the body and moves nothing.
+
+Note also what [`stable`](@ref) does not do: a name with four methods of which one is marked stays
+**in** the covenant. Declaring one dispatch path unsettled is not a licence to remove the name.
+
+## When a mark may go
+
+A mark that can only ever be added is a decoration. `until=` is what makes it a work item:
+
+```julia
+@experimental(
+    "no reference value yet",
+    since = v"0.1.0",
+    tracking = "https://github.com/org/Pkg.jl/issues/12",
+    until = () -> isfile(joinpath(@__DIR__, "..", "test", "refs", "energy.toml")),
+    energy(β) = 2β,
+)
+```
+
+[`ready_to_promote`](@ref) calls that predicate; [`promotable`](@ref) lists the marks whose exit
+condition is met. A mark with no `until=` is `false` **always** — reporting it "ready" because it
+happens to be covered by a test would be inventing a criterion the author did not state — and
+those are reported separately by [`marks_without_exit`](@ref), which is the different finding they
+are.
+
+[`age`](@ref) reads `since` on the axis a version bump is breaking along, and
+[`stale_since`](@ref) is the list a CI job turns into a nag. [`exceeds_mark_cap`](@ref) is the
+ratchet, in the shape `test_surface`'s `skip` already has.
+
+## Provenance next to the result
+
+```julia
+stamp("figures/energy_sweep.provenance.toml") do
+    sweep(model; βs = 0.05:0.05:2.0)
+end
+```
+
+The end state this is all for: a figure's directory says which unvalidated code paths produced it,
+in plain TOML with the reason, the counts and [`stamp_versions`](@ref) beside them. A year later
+the package may not resolve, and a provenance record nobody can open is not one.

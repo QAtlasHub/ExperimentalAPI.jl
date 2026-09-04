@@ -7,13 +7,18 @@ authors = ["sota shimozono <shimozono-sota631@g.ecc.u-tokyo.ac.jp>"]
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 
 [weakdeps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+Profile = "9abbd945-dff8-562f-b5e8-e1ebf5ef1b79"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [extensions]
+ExperimentalAPIDocumenterExt = "Documenter"
+ExperimentalAPIProfileExt = "Profile"
 ExperimentalAPITestExt = "Test"
 
 [compat]
 Aqua = "0.8"
+Documenter = "1"
 Profile = "1"
 TOML = "1"
 Test = "1"
@@ -21,8 +26,14 @@ julia = "1.11"
 
 [extras]
 Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 Profile = "9abbd945-dff8-562f-b5e8-e1ebf5ef1b79"
+TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test", "Aqua", "Profile"]
+# `TOML` is a dependency of the package, and `test/spec/test_spec_integration.jl` also imports it
+# directly to read a stamp back. Named here rather than relied on through the manifest: a test
+# file that imports a package's own dependency without declaring it is the shape that breaks the
+# day the dependency is dropped.
+test = ["Test", "Aqua", "Documenter", "Profile", "TOML"]

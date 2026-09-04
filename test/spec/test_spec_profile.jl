@@ -139,64 +139,88 @@ end
 # ── the opt-in layer: the basic question ─────────────────────────────────────────────────────
 
 @testset "a run reports which marked definitions it entered" begin
-    @test_broken :energy in
-        [h.name for h in ExperimentalAPI.record(() -> Sim.driver(M, 100))]
+    @test :energy in [h.name for h in ExperimentalAPI.record(() -> Sim.driver(M, 100))]
 end
 
 @testset "a run reports how many times each was entered" begin
-    @test_broken ExperimentalAPI.record(() -> Sim.driver(M, 100))[1].count == 100
+    @test ExperimentalAPI.record(() -> Sim.driver(M, 100))[1].count == 100
+    # …and the count is of THIS block, not of the process: the same call again reports 100 and
+    # not 200, which is what makes a record a measurement of one run.
+    @test ExperimentalAPI.record(() -> Sim.driver(M, 100))[1].count == 100
 end
 
 @testset "a marked definition the run never entered is absent, not zero" begin
     # Control: separates observed from enumerated.
-    @test_broken :cold ∉ [h.name for h in ExperimentalAPI.record(() -> Sim.driver(M, 10))]
+    @test :cold ∉ [h.name for h in ExperimentalAPI.record(() -> Sim.driver(M, 10))]
 end
 
 @testset "a run that touches nothing marked reports an empty record, not an error" begin
-    @test_broken ExperimentalAPI.record(() -> sum(1:10)) == []
+    @test ExperimentalAPI.record(() -> sum(1:10)) == []
 end
 
 @testset "a record distinguishes 'touched nothing' from 'recording was off'" begin
     # Both are an empty vector otherwise, and they mean opposite things.
-    @test_broken ExperimentalAPI.record(() -> sum(1:10)).enabled === true
+    @test ExperimentalAPI.record(() -> sum(1:10)).enabled === true
 end
 
 # ── granularity ──────────────────────────────────────────────────────────────────────────────
 
 @testset "attribution is to a method, not to a name" begin
-    @test_broken first(ExperimentalAPI.record(() -> Sim.driver(M, 10))).method isa Method
+    h = first(ExperimentalAPI.record(() -> Sim.driver(M, 10)))
+    @test h.method isa Method
+    @test h.method === which(Sim.energy, Tuple{Sim.Model})
 end
 
 @testset "two marked definitions in one run are reported separately" begin
-    @test_broken length(
-        ExperimentalAPI.record(() -> (Sim.driver(M, 10); Sim.sweep(M, 10)))
-    ) == 2
+    r = ExperimentalAPI.record(() -> (Sim.driver(M, 10); Sim.sweep(M, 10)))
+    @test length(r) == 2
+    @test Set(h.name for h in r) == Set([:energy, :correlator])
 end
 
 @testset "the call site that reached the mark is recorded" begin
     # Scope: which part of the caller's own code to distrust, not just that a mark was hit.
-    @test_broken !isempty(first(ExperimentalAPI.record(() -> Sim.driver(M, 10))).callers)
+    callers = first(ExperimentalAPI.record(() -> Sim.driver(M, 10))).callers
+    @test !isempty(callers)
+    # The immediate caller, not the marked definition itself — a `callers` list whose only entry
+    # is `energy` is a list of the wrong thing, and it reads exactly the same.
+    @test :inner in callers
+    @test :energy ∉ callers
 end
 
 @testset "the whole path from the entry point is available" begin
-    @test_broken :driver in first(ExperimentalAPI.record(() -> Sim.driver(M, 10))).paths[1]
+    paths = first(ExperimentalAPI.record(() -> Sim.driver(M, 10))).paths
+    @test :driver in paths[1]
+    # Innermost first, starting at the marked definition, so a reader can follow it outwards.
+    @test paths[1][1] === :energy
 end
 
 # ── proportion, not just presence ────────────────────────────────────────────────────────────
 
 @testset "the record says what fraction of the run was inside experimental code" begin
-    @test_broken 0.0 <
-        ExperimentalAPI.experimental_fraction(
-            ExperimentalAPI.record(() -> Sim.driver(M, 100_000))
-        ) <=
-        1.0
+    # Long enough to be sampled: the timing backend is Julia's sampling profiler, and a run that
+    # finishes inside one sampling interval has no fraction to report. Two million iterations of
+    # a recorded body is tens of milliseconds — hundreds of samples, not a handful.
+    r = ExperimentalAPI.record(() -> Sim.driver(M, 2_000_000))
+    @test r.sampled                                   # …the backend really was loaded
+    f = ExperimentalAPI.experimental_fraction(r)
+    @test 0.0 < f <= 1.0
 end
 
 @testset "inclusive and exclusive time are distinguished" begin
     # Scope: a marked wrapper over settled code is not a marked kernel.
-    @test_broken let h = first(ExperimentalAPI.record(() -> Sim.driver(M, 1000)))
-        h.inclusive >= h.exclusive
-    end
+    h = first(ExperimentalAPI.record(() -> Sim.driver(M, 1000)))
+    @test h.inclusive >= h.exclusive
+    @test h.inclusive isa Float64
+end
+
+@testset "without a timing backend the fraction is missing, not zero" begin
+    # Control for the two above: `Profile` is loaded in this file, so the only way to see the
+    # other branch is to ask a record that was not sampled. Zero would say the run spent no time
+    # in marked code, which is the opposite of "nobody measured".
+    r = ExperimentalAPI.record(() -> Sim.driver(M, 100); timing=false)
+    @test r.sampled === false
+    @test ExperimentalAPI.experimental_fraction(r) === missing
+    @test first(r).inclusive === missing
 end
 
 # ── the floor: what may be emitted into the body ─────────────────────────────────────────────
@@ -282,33 +306,50 @@ end
 
 @testset "recording survives inlining" begin
     # Scope: marked definitions are usually small, so a mechanism needing `@noinline` is no
-    # mechanism. This is why the sampling route was rejected.
-    @test_broken ExperimentalAPI.record(() -> Sim.driver(M, 100))[1].count == 100
+    # mechanism. `Sim.energy` is one multiplication and is inlined into `inner`, which is inlined
+    # into `driver`; the count still has to be exact. This is why the sampling route was rejected.
+    @test ExperimentalAPI.record(() -> Sim.driver(M, 100))[1].count == 100
 end
 
 @testset "detection is on by default; counting is not" begin
     @test ExperimentalAPI.detecting() === true
-    @test_broken ExperimentalAPI.recording() === false
+    @test ExperimentalAPI.recording() === false
+    # …and it is on exactly inside the block, which is the whole cost argument.
+    @test ExperimentalAPI.record(() -> ExperimentalAPI.recording()) isa AbstractVector
+    inside = Ref(false)
+    ExperimentalAPI.record(() -> (inside[] = ExperimentalAPI.recording()))
+    @test inside[] === true
+    @test ExperimentalAPI.recording() === false
 end
 
 @testset "the default layer's cost is stated, and it is the flag's cost" begin
     # Not `>= 0`, which every number satisfies. Above a few percent it has become a counter.
-    @test_broken ExperimentalAPI.overhead_when_detecting() < 0.10
+    @test ExperimentalAPI.overhead_when_detecting() < 0.10
+    # Stated rather than re-measured: a wall-clock figure taken on a shared runner is a flake
+    # generator, and a number that moves with the machine is not one a caller can plan against.
+    @test ExperimentalAPI.overhead_when_detecting() ===
+        ExperimentalAPI.overhead_when_detecting()
 end
 
 @testset "the opt-in layer's overhead is measured and reported, not discovered" begin
-    @test_broken ExperimentalAPI.record(() -> Sim.driver(M, 1000)).overhead isa Real
+    r = ExperimentalAPI.record(() -> Sim.driver(M, 1000))
+    @test r.overhead isa Real
+    @test 0.0 <= r.overhead <= 1.0
 end
 
 @testset "recording nests without double counting" begin
-    @test_broken ExperimentalAPI.record(
-        () -> ExperimentalAPI.record(() -> Sim.driver(M, 10))
-    )[1].count == 10
+    @test ExperimentalAPI.record(() -> ExperimentalAPI.record(() -> Sim.driver(M, 10)))[1].count ==
+        10
 end
 
 @testset "an exception inside the recorded block still yields a record" begin
-    @test_broken ExperimentalAPI.record(() -> error("boom"); rethrow=false) isa
-        AbstractVector
+    r = ExperimentalAPI.record(() -> (Sim.driver(M, 7); error("boom")); rethrow=false)
+    @test r isa AbstractVector
+    # The part that ran is in it: a record that swallowed the exception AND the counts would be
+    # indistinguishable from a block that did nothing.
+    @test r[1].count == 7
+    # …and by default the exception is not swallowed.
+    @test_throws ErrorException ExperimentalAPI.record(() -> error("boom"))
 end
 
 # ── concurrency and distribution ─────────────────────────────────────────────────────────────
@@ -324,76 +365,139 @@ end
     threaded() = Threads.@threads for _ in 1:8
         Sim.driver(M, 100)
     end
-    @test_broken ExperimentalAPI.record(threaded)[1].count == 800
+    @test ExperimentalAPI.record(threaded)[1].count == 800
 end
 
 @testset "per-thread storage is sized by maxthreadid, not nthreads" begin
     # The interactive pool is counted separately, so `threadid()` exceeds `nthreads()` — an
     # `nthreads()`-sized vector throws on the first hit from a REPL task.
     @test Threads.maxthreadid() >= Threads.nthreads()
-    @test_broken ExperimentalAPI.record(() -> Sim.driver(M, 10)).slots >=
-        Threads.maxthreadid()
+    @test ExperimentalAPI.record(() -> Sim.driver(M, 10)).slots >= Threads.maxthreadid()
 end
 
 @testset "a merged record is still a record" begin
     # `isa AbstractVector` would let the merge return a plain `Vector` with no `.enabled`.
-    @test_broken hasproperty(
+    @test hasproperty(
         ExperimentalAPI.merge_records([ExperimentalAPI.record(() -> Sim.driver(M, 10))]),
         :enabled,
     )
 end
 
 @testset "records from separate processes merge into one" begin
-    @test_broken ExperimentalAPI.merge_records([
+    m = ExperimentalAPI.merge_records([
         ExperimentalAPI.record(() -> Sim.driver(M, 10)) for _ in 1:2
-    ]) isa AbstractVector
+    ])
+    @test m isa AbstractVector
+    # Counts ADD. A merge that took the maximum, or the last one, would also be a record.
+    @test m[1].count == 20
 end
 
 @testset "merging is associative and order-independent" begin
     # Workers finish in arbitrary order; provenance must not depend on that.
-    @test_broken let a = ExperimentalAPI.record(() -> Sim.driver(M, 10)),
-        b = ExperimentalAPI.record(() -> Sim.sweep(M, 10))
-
-        ExperimentalAPI.merge_records([a, b]) == ExperimentalAPI.merge_records([b, a])
-    end
+    a = ExperimentalAPI.record(() -> Sim.driver(M, 10))
+    b = ExperimentalAPI.record(() -> Sim.sweep(M, 10))
+    @test ExperimentalAPI.merge_records([a, b]) == ExperimentalAPI.merge_records([b, a])
+    # …and the fixture can disagree: the two records are not equal to each other.
+    @test a != b
 end
 
 # ── coexistence with the profiler people already use ─────────────────────────────────────────
 
 @testset "recording does not disturb Profile" begin
-    @test_broken ExperimentalAPI.record(() -> Sim.driver(M, 10); with_profile=true) isa
-        AbstractVector
+    # `with_profile = true` means the caller is already using the buffer: whatever is in it stays.
+    Profile.clear()
+    Profile.@profile Sim.driver(M, 200_000)
+    before = length(Profile.fetch(; include_meta=false))
+    @test before > 0
+    r = ExperimentalAPI.record(() -> Sim.driver(M, 10); with_profile=true)
+    @test r isa AbstractVector
+    @test length(Profile.fetch(; include_meta=false)) >= before
+    # Control: without the keyword the buffer is cleared, so the keyword is doing the work.
+    ExperimentalAPI.record(() -> Sim.driver(M, 10))
+    @test length(Profile.fetch(; include_meta=false)) < before
 end
+
+# `Sim.energy` is one multiplication, and after inlining there is no frame for a sampler to
+# attribute anything to — see `attribute`'s docstring, and note that this is exactly why
+# `record`'s counts come from a counter and not from samples. The fixture for the sampling
+# question therefore has to be a marked definition that is worth a sample.
+module Hot
+
+using ExperimentalAPI
+
+public grind, settled_grind
+
+@experimental "the summation order is provisional" function grind(n::Int)
+    s = 0.0
+    for i in 1:n
+        s += sqrt(abs(sin(i * 1.0)))
+    end
+    return s
+end
+
+"Settled, and just as hot."
+function settled_grind(n::Int)
+    s = 0.0
+    for i in 1:n
+        s += sqrt(abs(cos(i * 1.0)))
+    end
+    return s
+end
+
+end # module Hot
 
 @testset "an existing Profile buffer can be attributed after the fact" begin
     # Scope: a twelve-hour run already profiled must not have to be run again.
-    @test_broken ExperimentalAPI.attribute(Profile.fetch()) isa AbstractVector
+    Hot.grind(10)
+    Hot.settled_grind(10)
+    Profile.clear()
+    Profile.init(; delay=1e-4)
+    Profile.@profile (Hot.grind(2_000_000); Hot.settled_grind(2_000_000))
+    a = ExperimentalAPI.attribute(Profile.fetch())
+    @test a isa AbstractVector
+    @test :grind in [x.name for x in a]
+    # Samples, never calls: a sampling profiler cannot count entries, and a field called `count`
+    # holding a sample total would read as a measurement it did not make.
+    @test all(x -> x isa ExperimentalAPI.Attribution, a)
+    @test !any(x -> hasproperty(x, :count), a)
+    # Control: `settled_grind` is exactly as hot and carries no mark, so it must not appear.
+    @test :settled_grind ∉ [x.name for x in a]
+    Profile.clear()
 end
 
 # ── the output is evidence, not a printout ───────────────────────────────────────────────────
 
 @testset "a record is serialisable" begin
-    @test_broken ExperimentalAPI.write_record(
+    path = ExperimentalAPI.write_record(
         tempname(), ExperimentalAPI.record(() -> Sim.driver(M, 10))
-    ) isa AbstractString
+    )
+    @test path isa AbstractString
+    # Readable without this package: plain TOML, with the reason in it.
+    @test occursin("convergence not established", read(path, String))
 end
 
 @testset "a serialised record round-trips" begin
-    @test_broken ExperimentalAPI.read_record(
-        ExperimentalAPI.write_record(
-            tempname(), ExperimentalAPI.record(() -> Sim.driver(M, 10))
-        ),
-    ) isa AbstractVector
+    r = ExperimentalAPI.record(() -> Sim.driver(M, 10))
+    back = ExperimentalAPI.read_record(ExperimentalAPI.write_record(tempname(), r))
+    @test back isa AbstractVector
+    @test length(back) == length(r)
+    @test back[1].count == r[1].count
+    @test back[1].reason == r[1].reason
+    # A `Method` is not a thing a file can carry, and inventing one on the way back in would
+    # claim the code in this process is the code that produced the record.
+    @test back[1].method === nothing
 end
 
 @testset "a record names the versions it was taken against" begin
     # `energy` being experimental in v0.3 says nothing about v0.9.
-    @test_broken ExperimentalAPI.record(() -> Sim.driver(M, 10)).versions isa AbstractDict
+    v = ExperimentalAPI.record(() -> Sim.driver(M, 10)).versions
+    @test v isa AbstractDict
+    @test !isempty(v)
 end
 
 @testset "the reason is carried into the record" begin
     # Scope: readable a year later by someone who never saw the source.
-    @test_broken occursin(
+    @test occursin(
         "convergence", first(ExperimentalAPI.record(() -> Sim.driver(M, 10))).reason
     )
 end
@@ -401,10 +505,20 @@ end
 # ── using it as a gate ───────────────────────────────────────────────────────────────────────
 
 @testset "a run can be asserted to have touched nothing experimental" begin
-    @test_broken ExperimentalAPI.assert_clean(() -> 1 + 1)
+    @test ExperimentalAPI.assert_clean(() -> 1 + 1)
 end
 
 @testset "the assertion fails, naming the mark, when the run is not clean" begin
     # Control: a gate that cannot be shown to fire is not a gate.
-    @test_broken !ExperimentalAPI.assert_clean(() -> Sim.driver(M, 10); throw=false)
+    @test !ExperimentalAPI.assert_clean(() -> Sim.driver(M, 10); throw=false)
+    e = try
+        ExperimentalAPI.assert_clean(() -> Sim.driver(M, 10))
+        nothing
+    catch err
+        err
+    end
+    @test e isa ErrorException
+    msg = sprint(showerror, e)
+    @test occursin("energy", msg)
+    @test occursin("convergence not established", msg)   # the reason, not only the name
 end
