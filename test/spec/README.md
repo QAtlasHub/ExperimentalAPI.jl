@@ -45,7 +45,7 @@ that is entirely `@test_broken` is a claim written down, not a check being run.
 |---|---|---|---|---|
 | `test_spec_declare.jl` | 11 | 7 | 4 | what can carry a mark: function, method, struct, const, module, macro, extension |
 | `test_spec_dispatch.jl` | 14 | 4 | 10 | one call site, several methods, only some marked — the branch |
-| `test_spec_docstring.jl` | 9 | 6 | 3 | a mark and a docstring are different accounts and must coexist |
+| `test_spec_docstring.jl` | 9 | 8 | 1 | a mark and a docstring are different accounts and must coexist |
 | `test_spec_foreign.jl` | 14 | 5 | 9 | marking a method on somebody else's generic — the `QAtlas.fetch` case |
 | `test_spec_forms.jl` | 26 | 15 | 11 | the definition forms a real package hits on its second afternoon |
 | `test_spec_integration.jl` | 17 | 1 | 16 | where the mark has to surface: docs, Aqua, releases, provenance, CI |
@@ -53,7 +53,7 @@ that is entirely `@test_broken` is a claim written down, not a check being run.
 | `test_spec_profile.jl` | 40 | 12 | 28 | what a real run went through, how often, and how much of it |
 | `test_spec_propagate.jl` | 20 | 2 | 18 | a caller that never names a marked thing still depends on it |
 | `test_spec_verify.jl` | 8 | 2 | 6 | how well is a marked thing exercised by the tests |
-| **10 files** | **174** | **61** | **113** | |
+| **10 files** | **174** | **63** | **111** | |
 <!-- END GENERATED -->
 
 The table is generated and pinned by `test/test_spec_table.jl`, which fails if it goes stale —

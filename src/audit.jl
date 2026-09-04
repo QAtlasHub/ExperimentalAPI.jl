@@ -94,6 +94,7 @@ struct Audit
     foreign::Vector{Symbol}
     documented::Vector{Symbol}
     declared::Vector{Symbol}
+    undocumented::Vector{Symbol}
     unaccounted::Vector{Symbol}
     dangling::Vector{Symbol}
 end
@@ -101,19 +102,27 @@ end
 """
     audit(m::Module) -> Audit
 
-List the public names of `m` that are **neither documented nor declared experimental**.
+Report the public names of `m` that are missing prose, a mark, or both.
 
 ```julia
-julia> audit(Pinax).unaccounted
+julia> audit(Pinax).undocumented
 15-element Vector{Symbol}:
  :completeness_overview
  :dump_test_report
  ⋮
 ```
 
-Two accounts are accepted, and the choice between them is the author's: write the docstring, or
-say [`@experimental`](@ref) and why. What is not accepted is saying nothing — which is the state
-a public name is in by default, and the state no reader can distinguish from a settled one.
+**A mark is not a substitute for a docstring.** The two are independent accounts of a name and
+both are owed: the docstring says what it does, the mark says whether the shape is settled. A
+public name that carries a mark and no prose appears in `undocumented` exactly as one with
+neither does, and [`test_surface`](@ref) fails on it.
+
+| field | what it holds |
+|---|---|
+| `documented` | has a docstring |
+| `declared` | has a mark — overlaps `documented`, and is not an alternative to it |
+| `undocumented` | no docstring, mark or not. This is the one [`test_surface`](@ref) asserts empty |
+| `unaccounted` | neither account — a subset of `undocumented`, and the worst case |
 
 Also reports `dangling`: marks on names that are not public. That check needs no reference
 implementation to be right, because the module is disagreeing with itself.
@@ -135,21 +144,25 @@ function audit(m::Module)
     foreign = Symbol[]
     documented = Symbol[]
     declared = Symbol[]
+    undocumented = Symbol[]
     unaccounted = Symbol[]
     for n in surf
         if !_is_own(m, n)
             push!(foreign, n)
-        elseif isdocumented(m, n)
+            continue
+        end
+        n in marked && push!(declared, n)
+        if isdocumented(m, n)
             push!(documented, n)
-            n in marked && push!(declared, n)
-        elseif n in marked
-            push!(declared, n)
         else
-            push!(unaccounted, n)
+            push!(undocumented, n)
+            n in marked || push!(unaccounted, n)
         end
     end
     dangling = sort!(collect(setdiff(marked, surf)))
-    return Audit(m, surf, foreign, documented, declared, unaccounted, dangling)
+    return Audit(
+        m, surf, foreign, documented, declared, undocumented, unaccounted, dangling
+    )
 end
 
 function Base.show(io::IO, a::Audit)
@@ -160,8 +173,8 @@ function Base.show(io::IO, a::Audit)
         ": ",
         length(a.surface),
         " public, ",
-        length(a.unaccounted),
-        " unaccounted)",
+        length(a.undocumented),
+        " undocumented)",
     )
 end
 
@@ -169,6 +182,8 @@ function Base.show(io::IO, ::MIME"text/plain", a::Audit)
     println(io, "Public surface of ", a.mod, " — ", length(a.surface), " names")
     println(io, "  documented    ", lpad(length(a.documented), 4))
     println(io, "  experimental  ", lpad(length(a.declared), 4))
+    isempty(a.undocumented) ||
+        println(io, "  undocumented  ", lpad(length(a.undocumented), 4))
     isempty(a.foreign) || println(
         io,
         "  foreign       ",

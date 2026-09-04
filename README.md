@@ -67,10 +67,10 @@ it at run time. One flag per marked *name*, so two methods of a marked name shar
 
 ## It is also a check
 
-Julia already checks half of the surface question: `Docs.undocumented_names` has been public API
-in Base since 1.11, and `Aqua.test_undocumented_names` ships it as a test — every public name must
-carry a docstring. What neither can express is the third answer: *this name is public, it has no
-docstring, and that is deliberate, and here is why*.
+**A mark is not a substitute for a docstring.** Every public name should have one; the mark is a
+second, independent account — the docstring says what the name does, the mark says whether its
+shape is settled. A marked name with no prose fails the check exactly as an unmarked one does,
+and there is no switch that turns that off.
 
 A marker nobody compares against anything is a claim. Put this in `runtests.jl` and it becomes a
 contract:
@@ -81,9 +81,8 @@ using MyPackage, ExperimentalAPI, Test
 ExperimentalAPI.test_surface(MyPackage)
 ```
 
-It fails, naming the symbol, when a public name has neither a docstring nor a mark — and also
-when a mark points at a name that was never made public, which is the module contradicting
-itself.
+It fails, naming the symbol, when a public name has no docstring — and also when a mark points at
+a name that was never made public, which is the module contradicting itself.
 
 Adopting it on a package that already has a backlog:
 
@@ -116,14 +115,20 @@ Attached to a definition, or as a list of names defined elsewhere:
 
 ```julia
 # the definition site
-@experimental "signature will be wrapped once the write-back refactor settles" \
-function ingest(config; doc, kwargs...)
-    # ...
-end
+@experimental(
+    "signature will be wrapped once the write-back refactor settles",
+    function ingest(config; doc, kwargs...)
+        # ...
+    end,
+)
 
 # names an included file defines
-@experimental "reads Test's internal result tree; not dogfooded in CI" \
-    render_test_report dump_test_report load_test_dump
+@experimental(
+    "reads Test's internal result tree; not dogfooded in CI",
+    render_test_report,
+    dump_test_report,
+    load_test_dump,
+)
 
 # with the issue where the shape is being decided
 @experimental("export format is a guess until someone consumes it",
@@ -199,7 +204,7 @@ public, which is the module contradicting itself and needs no reference to be wr
 | who may call a name | `export`, `public` (1.11) | orthogonal — a name can be public and unfinished |
 | a name on its way out | `@deprecate` | opposite direction |
 | type stability | DispatchDoctor | unrelated |
-| every public name has a docstring | `Docs.undocumented_names` (Base 1.11+), `Aqua.test_undocumented_names` | the same check, plus a third answer |
+| every public name has a docstring | `Docs.undocumented_names` (Base 1.11+), `Aqua.test_undocumented_names` | the same requirement, not a looser one — plus `foreign` and `dangling` |
 | generating documentation | Documenter | only ever checks whether prose exists |
 | run-time behaviour | — | one short-circuit read in the body; see the table above |
 

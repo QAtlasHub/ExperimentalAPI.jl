@@ -20,8 +20,8 @@ The mark is three things, and the first is the reason to have it:
   * an **observation** — [`entered`](@ref) reports the marked definitions this run actually went
     through, and a summary says so at process exit whether or not anyone asked;
   * a **declaration** — the reason travels with the name, in the source, where the author is;
-  * a **check** — [`audit`](@ref) reports every public name that is neither documented nor
-    declared, so "document it or admit it is unfinished" becomes a test that fails.
+  * a **check** — [`audit`](@ref) reports every public name with no docstring, marked or not, so
+    "every public name is described" becomes a test that fails.
 
 # What it costs
 
@@ -41,7 +41,7 @@ See [`@experimental`](@ref) for the form-by-form table.
 |---|---|
 | did this run go through unvalidated code? | `entered()` — and the summary at exit says so anyway |
 | what is unfinished here? | `experimental(M)` |
-| what does this module owe nobody an explanation for? | `audit(M).unaccounted` — should be empty |
+| which public names are undescribed? | `audit(M).undocumented` — should be empty |
 | is dropping this name breaking? | `compare(old_snapshot, M)` — see [`isbreaking`](@ref) |
 
 # What this is not
@@ -57,10 +57,11 @@ See [`@experimental`](@ref) for the form-by-form table.
 
 # Scope of the check
 
-[`audit`](@ref) compares `names(M)` — exported *and* `public` names — against two accounts:
-a docstring, or a mark. It sees **names**, not signatures and not prose quality. A public name
-with a docstring reading "TODO" is accounted for; a settled name whose method signature changed
-under it is invisible here. See [`compare`](@ref) for the same limit on the release side.
+[`audit`](@ref) compares `names(M)` — exported *and* `public` names — against two independent
+accounts: a docstring, and a mark. They are not alternatives; the docstring is owed either way.
+It sees **names**, not signatures and not prose quality. A public name with a docstring reading
+"TODO" is accounted for; a settled name whose method signature changed under it is invisible here.
+See [`compare`](@ref) for the same limit on the release side.
 """
 module ExperimentalAPI
 
@@ -84,8 +85,13 @@ include("release.jl")   # a snapshot of the covenant, and what a diff of two of 
 """
     test_surface(m::Module; skip = Symbol[], outputlevel::Int = 0) -> Audit
 
-Assert, as a `@testset`, that every public name of `m` is either documented or declared
-[`@experimental`](@ref) — and that every mark applies to a name that is actually public.
+Assert, as a `@testset`, that every public name of `m` has a **docstring** — and that every mark
+applies to a name that is actually public.
+
+A mark is not an alternative to prose. `@experimental` records that a shape is unsettled, which is
+never a reason to say nothing about what the name does, so a marked-but-undocumented name fails
+this test exactly as an unmarked one does. There is no switch to turn that off; `skip` is the only
+escape, and it is per-name, visible, and can only shrink.
 
 Available once `Test` is loaded (it lives in a package extension, so `ExperimentalAPI` itself
 never pulls `Test` into a runtime dependency). Put it in `runtests.jl`:
@@ -96,9 +102,9 @@ using MyPackage, ExperimentalAPI, Test
 ExperimentalAPI.test_surface(MyPackage)
 ```
 
-`skip` is for adopting this on a package that already has a backlog: the listed names are
-allowed to be unaccounted for. **A stale entry fails the test** — a name in `skip` that has since
-been documented, declared, or removed is reported, so the list can only shrink.
+`skip` is for adopting this on a package that already has a backlog: the listed names are allowed
+to have no docstring. **A stale entry fails the test** — a name in `skip` that has since been
+documented or removed is reported, so the list can only shrink.
 
 Returns the [`Audit`](@ref) on the normal return path whether the testset passed or not.
 `outputlevel ≥ 1` also prints it.
