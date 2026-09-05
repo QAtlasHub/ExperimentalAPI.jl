@@ -51,7 +51,7 @@ Archeion.ingest — experimental
 ```julia
 @experimental("export format is a guess until someone consumes it",
     since = v"0.4.0",
-    tracking = "https://github.com/org/Pkg.jl/issues/12",
+    tracking = "https://example.invalid/issues/12",
     registry_entry(x) = x)
 ```
 

@@ -260,7 +260,7 @@ same way.
 mark_method!(
     which(fetch_value, Tuple{Heisenberg,Energy}),
     "numerically delicate; no reference value";
-    tracking = "https://github.com/org/Pkg.jl/issues/12",
+    tracking = "https://example.invalid/issues/12",
 )
 ```
 
