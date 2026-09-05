@@ -4,7 +4,12 @@ using Documenter
 makedocs(;
     sitename="ExperimentalAPI.jl",
     format=Documenter.HTML(;
-        canonical="https://codes.sota-shimozono.com/ExperimentalAPI.jl/stable/",
+        # Measured 2026-09-03: the host serves `/` and `/dev/` with 200 and `/stable/` with 404,
+        # because `gh-pages` holds only `dev` until a version is tagged. `/stable/` is still the
+        # right canonical target — it materialises on the first release, and `/dev/` is a moving
+        # target that should never be canonical. The previous value pointed at a host that does
+        # not resolve at all.
+        canonical="https://qatlashub.github.io/ExperimentalAPI.jl/stable/",
         prettyurls=get(ENV, "CI", "false") == "true",
         edit_link="main",
     ),
