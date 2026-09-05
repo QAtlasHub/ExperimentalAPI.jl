@@ -28,8 +28,8 @@ tracking = "https://github.com/org/MyPackage.jl/issues/12"
 On the next release, compare:
 
 ```julia
-d = compare(read_snapshot("api.toml"), MyPackage)
-isbreaking(d) && error("breaking: $(d.removed_stable) removed, $(d.demoted) demoted")
+d = ExperimentalAPI.compare(ExperimentalAPI.read_snapshot("api.toml"), MyPackage)
+ExperimentalAPI.isbreaking(d) && error("breaking: $(d.removed_stable) removed, $(d.demoted) demoted")
 ```
 
 ## What counts as breaking
@@ -115,7 +115,7 @@ ratchet, in the shape `test_surface`'s `skip` already has.
 ## Provenance next to the result
 
 ```julia
-stamp("figures/energy_sweep.provenance.toml") do
+ExperimentalAPI.stamp("figures/energy_sweep.provenance.toml") do
     sweep(model; βs = 0.05:0.05:2.0)
 end
 ```

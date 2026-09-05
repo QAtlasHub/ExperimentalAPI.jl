@@ -24,7 +24,7 @@ A mark says the shape is unsettled. That is never a reason to say nothing about 
 does, so a marked name with no prose is a finding exactly as an unmarked one is.
 
 ```julia
-julia> audit(Archeion)
+julia> ExperimentalAPI.audit(Archeion)
 Public surface of Archeion — 36 names
   documented      33
   experimental     0
@@ -111,12 +111,12 @@ see exactly which names it would have to argue about. Empty means the two agree.
 ## The method-level half
 
 ```julia
-julia> audit(Downstream).contributed_methods
+julia> ExperimentalAPI.audit(Downstream).contributed_methods
 4-element Vector{Method}:
  fetch_value(::Ising, ::Energy) …
  ⋮
 
-julia> unaccounted_methods(Downstream)      # neither a docstring nor a mark
+julia> ExperimentalAPI.unaccounted_methods(Downstream)      # neither a docstring nor a mark
 2-element Vector{Method}:
  ⋮
 ```
@@ -139,11 +139,11 @@ The mark records where it was written, and `--code-coverage` records a count per
 two answers the worst case a marked definition can be in:
 
 ```julia
-julia> unverified(MyPackage)          # marked AND never executed by the suite
+julia> ExperimentalAPI.unverified(MyPackage)          # marked AND never executed by the suite
 1-element Vector{ExperimentalAPI.Mark}:
- Mark(MyPackage.never_called, "shipped without ever being called")
+ ExperimentalAPI.Mark(MyPackage.never_called, "shipped without ever being called")
 
-julia> coverage(MyPackage, :half_exercised)
+julia> ExperimentalAPI.coverage(MyPackage, :half_exercised)
 0.6
 ```
 

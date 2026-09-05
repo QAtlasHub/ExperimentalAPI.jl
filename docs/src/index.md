@@ -11,7 +11,7 @@ had not validated.
 `@experimental` is that mark, written at the definition site where the author is, and readable by
 a machine so the answer arrives without anyone remembering to ask for it.
 
-```julia
+```@example frontpage
 using ExperimentalAPI
 
 @experimental "convergence not established below β ≈ 0.1" energy(β) = β * 1.0000001

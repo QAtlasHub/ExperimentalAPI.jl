@@ -12,7 +12,7 @@ and no idea which of them anybody meant.
 ```julia
 julia> using MyPackage, ExperimentalAPI
 
-julia> audit(MyPackage)
+julia> ExperimentalAPI.audit(MyPackage)
 ```
 
 Two numbers matter. `undocumented` is the backlog. `dangling` should be zero on day one, because

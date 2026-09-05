@@ -47,7 +47,7 @@ Three properties, each of them a decision:
 ```julia
 julia> ExperimentalAPI.entered()
 1-element Vector{ExperimentalAPI.Entry}:
- Entry(Main.energy, "convergence not established below β ≈ 0.1")
+ ExperimentalAPI.Entry(Main.energy, "convergence not established below β ≈ 0.1")
 ```
 
 The display above is a transcript rather than a doctest on purpose: `Entry` prints its module, and
@@ -117,7 +117,7 @@ table above.
 ## Recording: counts, paths and time
 
 ```julia
-r = record() do
+r = ExperimentalAPI.record() do
     simulate(model; steps = 10_000)
 end
 ```
@@ -177,7 +177,7 @@ make.
 [`assert_clean`](@ref) turns a record into a refusal:
 
 ```julia
-assert_clean() do
+ExperimentalAPI.assert_clean() do
     publish(compute(model))
 end
 ```

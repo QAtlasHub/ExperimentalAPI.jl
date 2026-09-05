@@ -241,7 +241,10 @@ function record(
             end
         end
     end
-    err === nothing || rethrow && Base.rethrow(err)
+    # `Base.rethrow(err)` is legal only inside a `catch`; here it raises
+    # "rethrow(exc) not allowed outside a catch block" and the caller never sees their own
+    # exception. `throw` gives a fresh backtrace, which is the price of building the record first.
+    err === nothing || rethrow && throw(err)
 
     hits = Hit[]
     for p in ps

@@ -154,12 +154,21 @@ end
 
 # A block is illustrative if it stands in for a package the reader supplies, and a transcript if
 # it shows a REPL session — `pkg>` as much as `julia>`, which is why the install block is here.
-function _is_illustrative(b)
-    return occursin("MyPackage", b) ||
-           occursin("MyPkg", b) ||
-           occursin("Archeion", b) ||
-           occursin("…", b)
-end
+# Names the documentation asks the reader to supply. Adding one is a deliberate act: a block that
+# needs a new placeholder fails here first, naming the identifier, rather than being skipped.
+const _PLACEHOLDERS = [
+    "MyPackage",
+    "MyPkg",
+    "Archeion",
+    "…",
+    "simulate",
+    "publish",
+    "compute",
+    "sweep",
+    "model",
+]
+
+_is_illustrative(b) = any(p -> occursin(p, b), _PLACEHOLDERS)
 _is_transcript(b) = occursin("julia>", b) || occursin("pkg>", b)
 
 @testset "every macro the documentation teaches exists" begin
@@ -205,5 +214,8 @@ end
         (p, i) for (p, i, b) in docs_blocks() if !_is_illustrative(b) && !_is_transcript(b)
     ]
     @test length(runnable) >= 5
-    @test ("index.md", 1) in runnable
+    # The front page's example is absent from that list because it is an `@example` block —
+    # Documenter runs it during the docs build, which is the stronger guard. Assert that, so
+    # turning it back into an inert ```julia fence is caught here.
+    @test occursin("```@example", read(joinpath(_DOCS, "index.md"), String))
 end

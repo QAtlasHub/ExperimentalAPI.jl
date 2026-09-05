@@ -38,7 +38,7 @@ odd; they cannot see that it is odd *because* a refactor upstream has not landed
 is required, and the mark carries it everywhere the name goes:
 
 ```julia
-julia> mark(Archeion, :ingest)
+julia> ExperimentalAPI.mark(Archeion, :ingest)
 Archeion.ingest — experimental
   reason:   signature will be wrapped once the write-back refactor settles
   since:    v0.1.4
@@ -117,7 +117,7 @@ end
 ```
 
 ```julia
-julia> audit(M).dangling
+julia> ExperimentalAPI.audit(M).dangling
 1-element Vector{Symbol}:
  :helper
 ```

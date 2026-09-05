@@ -8,14 +8,14 @@ CurrentModule = ExperimentalAPI
 *could* do — before running it, and including through code that never names the marked thing.
 
 ```julia
-julia> r = reach(analyse, Tuple{Model,Float64});
+julia> r = ExperimentalAPI.reach(analyse, Tuple{Model,Float64});
 
-julia> verdict(r)
+julia> ExperimentalAPI.verdict(r)
 :depends
 
 julia> r.reached
 1-element Vector{ExperimentalAPI.Reached}:
- Reached(MyModel.energy via analyse → sweep → inner → energy)
+ ExperimentalAPI.Reached(MyModel.energy via analyse → sweep → inner → energy)
 ```
 
 The model is Lean's `sorry`: a proof that uses one is not a proof, however many layers down it
@@ -79,8 +79,8 @@ A more specific unmarked method shadowing a marked one is resolved as what actua
 ## Whole modules, and scripts
 
 ```julia
-r = reach(MyPackage)
-verdict(r)                # one answer for the package
+r = ExperimentalAPI.reach(MyPackage)
+ExperimentalAPI.verdict(r)                # one answer for the package
 r.affected_entries        # …and which public entry points are not clean
 ```
 
@@ -95,8 +95,8 @@ evaluated in a scratch module, because the analysis has to resolve the names the
 ## The exit, read backwards
 
 ```julia
-dependents(MyPackage, :energy)                  # who reaches it
-verdict(reach(MyPackage; ignore = [:energy]))   # what removing the mark would change
+ExperimentalAPI.dependents(MyPackage, :energy)                  # who reaches it
+ExperimentalAPI.verdict(ExperimentalAPI.reach(MyPackage; ignore = [:energy]))   # what removing the mark would change
 ```
 
 `ignore` answers "what would removing this mark change?" without removing it. [`dependents`](@ref)
