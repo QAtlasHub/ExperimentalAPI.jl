@@ -403,20 +403,6 @@ end
 
 # ── coexistence with the profiler people already use ─────────────────────────────────────────
 
-@testset "recording does not disturb Profile" begin
-    # `with_profile = true` means the caller is already using the buffer: whatever is in it stays.
-    Profile.clear()
-    Profile.@profile Sim.driver(M, 200_000)
-    before = length(Profile.fetch(; include_meta=false))
-    @test before > 0
-    r = ExperimentalAPI.record(() -> Sim.driver(M, 10); with_profile=true)
-    @test r isa AbstractVector
-    @test length(Profile.fetch(; include_meta=false)) >= before
-    # Control: without the keyword the buffer is cleared, so the keyword is doing the work.
-    ExperimentalAPI.record(() -> Sim.driver(M, 10))
-    @test length(Profile.fetch(; include_meta=false)) < before
-end
-
 # `Sim.energy` is one multiplication, and after inlining there is no frame for a sampler to
 # attribute anything to — see `attribute`'s docstring, and note that this is exactly why
 # `record`'s counts come from a counter and not from samples. The fixture for the sampling
@@ -445,6 +431,30 @@ function settled_grind(n::Int)
 end
 
 end # module Hot
+
+@testset "recording does not disturb Profile" begin
+    # `with_profile = true` means the caller is already using the buffer: whatever is in it stays.
+    #
+    # Two things this measures rather than assumes. The buffer has to be filled by a run that is
+    # long compared with the sampling interval — `Sim.driver(M, 200_000)` is about one interval at
+    # the default rate, and came back with **zero** samples on macOS, which made the whole
+    # assertion a coin flip. And the size is read with `Profile.len_data`, not by fetching:
+    # `fetch(; include_meta = false)` strips metadata behind an `@assert` that fires on
+    # 1.14.0-DEV.3115 for a buffer this test did not fill.
+    Hot.grind(10)
+    Profile.clear()
+    Profile.init(; delay=1e-5)
+    Profile.@profile Hot.grind(2_000_000)
+    before = Profile.len_data()
+    @test before > 0
+    r = ExperimentalAPI.record(() -> Sim.driver(M, 10); with_profile=true)
+    @test r isa AbstractVector
+    @test Profile.len_data() >= before
+    # Control: without the keyword the buffer is cleared, so the keyword is doing the work.
+    ExperimentalAPI.record(() -> Sim.driver(M, 10))
+    @test Profile.len_data() < before
+    Profile.clear()
+end
 
 @testset "an existing Profile buffer can be attributed after the fact" begin
     # Scope: a twelve-hour run already profiled must not have to be run again.

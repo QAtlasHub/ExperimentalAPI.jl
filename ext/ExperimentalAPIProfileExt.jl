@@ -52,7 +52,7 @@ end
 # measurement away, and the symptom is a fraction of exactly zero rather than an error.
 function ExperimentalAPI.attribute_timing(::ProfileTiming)
     out = try
-        _fractions(Profile.fetch(; include_meta=false))
+        _fractions(_raw(Profile.fetch()))
     catch
         nothing
     end
@@ -65,7 +65,7 @@ function ExperimentalAPI.attribute_timing(::ProfileTiming)
 end
 
 function ExperimentalAPI.attribute(::ProfileTiming, data)
-    d = _stacks(data)
+    d = _stacks(_raw(data))
     total = length(d)
     out = Attribution[]
     total == 0 && return out
@@ -79,6 +79,18 @@ function ExperimentalAPI.attribute(::ProfileTiming, data)
         push!(out, Attribution(k[1], k[2], reasons[k], v[1], v[1] / total, v[2] / total))
     end
     return sort!(out; by=a -> (-a.inclusive, string(a.mod), string(a.name)))
+end
+
+# The instruction pointers, with the per-sample metadata removed. Asked for separately rather than
+# through `Profile.fetch(; include_meta = false)`, which does the same strip behind an
+# `@assert`: measured on 1.14.0-DEV.3115, that assertion fires (`metadata stripping failed`) on a
+# buffer this package did not fill, and an exception there would silently turn timing off.
+function _raw(data)
+    return try
+        Profile.has_meta(data) ? Profile.strip_meta(data) : data
+    catch
+        data
+    end
 end
 
 function _fractions(data)
