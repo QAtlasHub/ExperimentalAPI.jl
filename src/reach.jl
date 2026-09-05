@@ -343,7 +343,12 @@ function reach_script(
         end
     end
     thunk = Core.eval(scratch, Expr(:function, Expr(:call, gensym(:script)), body))
-    r = reach(thunk, Tuple{}; maxdepth, maxcandidates, ignore)
+    # `invokelatest`, because the walk reads the bindings the script's own `const` lines were just
+    # evaluated into and this call's world age was fixed before they existed. Julia 1.12 warns —
+    # "Detected access to binding … in a world prior to its definition world" — and says it will
+    # be an error in a future version. The analysis reads globals out of the IR, which is what
+    # makes this the one place in the package that reaches a binding younger than its caller.
+    r = Base.invokelatest(reach, thunk, Tuple{}; maxdepth, maxcandidates, ignore)
     return Reach(
         path,
         r.reached,

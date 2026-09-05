@@ -91,6 +91,53 @@ end
     @test ExperimentalAPI.verdict(ExperimentalAPI.reach(Main.CleanModule)) === :clean
 end
 
+# Run in a child process and read its stderr, because the failure it guards is a WARNING today and
+# an error later: reading a binding in a world prior to its definition world. `reach_script`
+# evaluates a script's `const` lines into a scratch module and then analyses a thunk that names
+# them, and the walk reads globals out of the IR — so it is the one place in this package that
+# reaches a binding younger than its own caller.
+#
+# Two things about the child are load bearing, and the first cost a test that could not fail.
+# `reach_script` is called from inside a FUNCTION: a caller's world age is fixed when it is
+# entered, and at top level it moves with every statement, so nothing is caught there. And the
+# child runs with the DEFAULT `depwarn`: measured on 1.12.2, `--depwarn=error` *suppresses* this
+# warning rather than promoting it, which is the opposite of what Julia's own hint says.
+const _WORLD_AGE_SCRIPT = """
+using ExperimentalAPI
+module L
+using ExperimentalAPI
+public marked, settled
+@experimental "why" marked(x::Float64) = x * 1.0000001
+"Settled."
+settled(x::Float64) = x
+end
+# Called from inside a FUNCTION, which is the whole point: a caller's world age is fixed when it
+# is entered, so the bindings `reach_script` creates while it runs are younger than the frame
+# reading them. At top level the world age moves with each statement and nothing is caught.
+function probe()
+    dir = mktempdir()
+    path = joinpath(dir, "figure.jl")
+    write(path, "using Main: L\nconst RESULT = L.marked(0.5)\nRESULT\n")
+    r = ExperimentalAPI.reach_script(path)
+    ExperimentalAPI.verdict(r) === :depends || error("expected :depends, got \$(ExperimentalAPI.verdict(r))")
+    return nothing
+end
+probe()
+print("OK")
+"""
+
+@testset "reach_script does not read a binding younger than its caller" begin
+    cmd = `$(Base.julia_cmd()) --startup-file=no --project=$(Base.active_project()) -e $_WORLD_AGE_SCRIPT`
+    out = IOBuffer()
+    ok = success(pipeline(ignorestatus(cmd); stdout=out, stderr=out))
+    text = String(take!(out))
+    # Non-vacuity: the child really did the analysis, so a child that exited early for an
+    # unrelated reason cannot pass this.
+    @test occursin("OK", text)
+    @test ok
+    @test !occursin("world prior to its definition", text)
+end
+
 @testset "a script can be the entry point" begin
     # The shape a researcher has: a file that produces a figure, not a package. The file must be
     # written — `tempname()` alone throws regardless of the implementation.
