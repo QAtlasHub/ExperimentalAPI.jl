@@ -51,11 +51,11 @@ that is entirely `@test_broken` is a claim written down, not a check being run.
 | `test_spec_foreign.jl` | 13 | 13 | 0 | marking a method on somebody else's generic — the `QAtlas.fetch` case |
 | `test_spec_forms.jl` | 24 | 24 | 0 | the definition forms a real package hits on its second afternoon |
 | `test_spec_integration.jl` | 19 | 19 | 0 | where the mark has to surface: docs, Aqua, releases, provenance, CI |
-| `test_spec_lifecycle.jl` | 15 | 15 | 0 | the mark's EXIT, and an entry point that is a module rather than a function |
+| `test_spec_lifecycle.jl` | 16 | 16 | 0 | the mark's EXIT, and an entry point that is a module rather than a function |
 | `test_spec_profile.jl` | 42 | 42 | 0 | what a real run went through, how often, and how much of it |
 | `test_spec_propagate.jl` | 20 | 20 | 0 | a caller that never names a marked thing still depends on it |
 | `test_spec_verify.jl` | 9 | 9 | 0 | how well is a marked thing exercised by the tests |
-| **10 files** | **178** | **178** | **0** | |
+| **10 files** | **179** | **179** | **0** | |
 <!-- END GENERATED -->
 
 The table is generated and pinned by `test/test_spec_table.jl`, which fails if it goes stale —
