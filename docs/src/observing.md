@@ -141,6 +141,38 @@ the way they look — with the properties an empty vector could not carry:
 | `overhead` | the recorder's estimated share of the elapsed time, from a calibrated per-hit cost |
 | `versions` | `energy` being experimental in v0.3 says nothing about v0.9 |
 
+### Asking about one call
+
+`record(() -> f(x))` is the function form, and it is what everything here is built on.
+[`@entered`](@ref) is the same question asked about an expression, and it knows two things a
+closure cannot — the source text of the call and the line it is written on:
+
+```julia
+julia> ExperimentalAPI.@entered sweep(model; βs = 0.05:0.05:2.0)
+┌ @entered sweep(model; βs = 0.05:0.05:2.0)   at sweep.jl:42
+│   MyPkg.energy       ×10000 — convergence not established below β ≈ 0.1
+│   MyPkg.correlator   ×  500 — edge cases at zero separation untested
+└ 15 of 17 observable marked definitions were not entered
+0.42713…
+```
+
+It returns the value of the expression, so it drops into existing code the way `@time` does. The
+last line is what makes a clean answer mean anything:
+
+```julia
+julia> ExperimentalAPI.@entered publish(result)
+┌ @entered publish(result)   at sweep.jl:57
+└ entered nothing marked — 17 observable marked definitions were loaded
+```
+
+"Entered nothing" and "nothing is marked anywhere" are different states, and a package that has
+not adopted this yet is in the second one. A report that could not tell them apart would read as
+reassurance on a package where nothing had ever been declared.
+
+It is `record(() -> expr; paths = false, timing = false)` plus the report — the cheap question,
+`which` and `how often`. For call paths, time, or the [`Record`](@ref) as data, call
+[`record`](@ref).
+
 ### How it counts without a counter in the body
 
 The emitted statement never changes. Opening a block clears every probe's flag, so the

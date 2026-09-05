@@ -8,5 +8,5 @@ What a run went through ([Observing](@ref)), and what a caller could reach ([Ana
 
 ```@autodocs
 Modules = [ExperimentalAPI]
-Pages = ["detect.jl", "record.jl", "reach.jl"]
+Pages = ["detect.jl", "record.jl", "macros.jl", "reach.jl"]
 ```
