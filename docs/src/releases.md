@@ -22,7 +22,7 @@ stable = ["adapt", "measure"]
 
 [experimental.render_report]
 reason = "reads Test's internal result tree"
-tracking = "https://github.com/org/MyPackage.jl/issues/12"
+tracking = "https://example.invalid/issues/12"
 ```
 
 On the next release, compare:
@@ -96,7 +96,7 @@ A mark that can only ever be added is a decoration. `until=` is what makes it a 
 @experimental(
     "no reference value yet",
     since = v"0.1.0",
-    tracking = "https://github.com/org/Pkg.jl/issues/12",
+    tracking = "https://example.invalid/issues/12",
     until = () -> isfile(joinpath(@__DIR__, "..", "test", "refs", "energy.toml")),
     energy(β) = 2β,
 )

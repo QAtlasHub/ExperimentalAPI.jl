@@ -28,7 +28,7 @@ stable_methods = ["adapt(::Model, ::Grid)", "measure(::Model)"]
 
 [experimental.render_report]
 reason = "reads Test's internal result tree"
-tracking = "https://github.com/org/MyPackage.jl/issues/12"
+tracking = "https://example.invalid/issues/12"
 
 [experimental_methods."fetch_value(::Heisenberg, ::Energy)"]
 reason = "numerically delicate; no reference value"
