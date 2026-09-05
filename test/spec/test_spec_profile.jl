@@ -352,6 +352,23 @@ end
     @test_throws ErrorException ExperimentalAPI.record(() -> error("boom"))
 end
 
+@testset "…and the default propagates the caller's own exception" begin
+    # `rethrow = true` is the default, and the assertion above it — `@test_throws
+    # ErrorException` — passed for the wrong reason. `Base.rethrow(err)` outside a `catch` raises
+    # `ErrorException("rethrow(exc) not allowed outside a catch block")`, which satisfies a check
+    # on the exception TYPE while the caller never saw their own error. Pin the message.
+    e = try
+        ExperimentalAPI.record(() -> error("the caller's own message"))
+        nothing
+    catch err
+        err
+    end
+    @test e isa ErrorException
+    @test occursin("the caller's own message", sprint(showerror, e))
+    # Control: the message that used to come out instead.
+    @test !occursin("not allowed outside a catch block", sprint(showerror, e))
+end
+
 # ── concurrency and distribution ─────────────────────────────────────────────────────────────
 
 @testset "the suite runs with more than one thread" begin

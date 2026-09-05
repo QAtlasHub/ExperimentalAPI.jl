@@ -291,3 +291,16 @@ end
     @test isempty(ExperimentalAPI.stale_since(Shown, v"0.2.0"))
     @test ExperimentalAPI.age(Shown, :provisional, v"0.9.0") == 7
 end
+
+@testset "stamp takes the do-block form the documentation teaches" begin
+    # `stamp(path) do … end` passes the function FIRST. Only `stamp(::AbstractString, ::Any)`
+    # existed, so the documented form raised `MethodError` — the docs taught a call that had no
+    # method. Typed `::Function` on the new one so `stamp(path, value)` stays unambiguous.
+    path = ExperimentalAPI.stamp(tempname()) do
+        1 + 1
+    end
+    @test isfile(path)
+    @test occursin("julia", read(path, String))
+    # …and the two-argument form still resolves the way it did.
+    @test ExperimentalAPI.stamp(tempname(), () -> 1 + 1) isa AbstractString
+end

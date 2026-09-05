@@ -14,6 +14,10 @@ makedocs(;
         edit_link="main",
     ),
     modules=[ExperimentalAPI],
+    # A `jldoctest` whose output stops matching fails the build. The message in `declaring.md`
+    # had drifted from the one the macro throws — it named the signature the macro never sees —
+    # which is what this catches.
+    doctest=true,
     # `:public` is the same claim this package makes about its users: a name on the public
     # surface without a docstring fails the build. ExperimentalAPI's own release layer is
     # declared @experimental AND documented, so it satisfies both.

@@ -327,6 +327,12 @@ function stamp(path::AbstractString, f)
     return stamp(path, record(f))
 end
 
+# `stamp(path) do … end` puts the function first, which is the form the documentation teaches and
+# the order `record` already takes. Typed `::Function` so `stamp(path, value)` stays unambiguous.
+function stamp(f::Function, path::AbstractString)
+    return stamp(path, f)
+end
+
 function stamp(path::AbstractString, r::Record)
     d = Dict{String,Any}(
         "generated" => string(Dates_now()),

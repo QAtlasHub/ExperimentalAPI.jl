@@ -1,5 +1,8 @@
 ```@meta
 CurrentModule = ExperimentalAPI
+DocTestSetup = quote
+    using ExperimentalAPI
+end
 ```
 
 # Observing
@@ -44,7 +47,29 @@ Three properties, each of them a decision:
 ```julia
 julia> ExperimentalAPI.entered()
 1-element Vector{ExperimentalAPI.Entry}:
- Entry(Main.energy, "convergence not established below β ≈ 0.1")
+ ExperimentalAPI.Entry(Main.energy, "convergence not established below β ≈ 0.1")
+```
+
+The display above is a transcript rather than a doctest on purpose: `Entry` prints its module, and
+Documenter evaluates doctests in a sandbox whose module does not print as `Main`, so a doctest here
+would show a line no reader ever sees at their own REPL. The fields it is read for do not depend on
+where it ran, so those are checked:
+
+```jldoctest
+julia> using ExperimentalAPI
+
+julia> @experimental "convergence not established below β ≈ 0.1" energy(β) = β * 1.0000001
+
+julia> energy(0.5);
+
+julia> only(ExperimentalAPI.entered()).name
+:energy
+
+julia> only(ExperimentalAPI.entered()).reason
+"convergence not established below β ≈ 0.1"
+
+julia> only(ExperimentalAPI.entered()).count === nothing
+true
 ```
 
 A marked definition the run never entered is **absent**, not reported with a count of zero — the
@@ -92,7 +117,7 @@ table above.
 ## Recording: counts, paths and time
 
 ```julia
-r = record() do
+r = ExperimentalAPI.record() do
     simulate(model; steps = 10_000)
 end
 ```
@@ -152,7 +177,7 @@ make.
 [`assert_clean`](@ref) turns a record into a refusal:
 
 ```julia
-assert_clean() do
+ExperimentalAPI.assert_clean() do
     publish(compute(model))
 end
 ```
