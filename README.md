@@ -45,6 +45,16 @@ docstring, and that no mark points at a name that was never made public. **A mar
 substitute for prose** — it records that a shape is unsettled, which is never a reason to say
 nothing about what the name does.
 
+Two further questions, both opt-in.
+[`record(f)`](https://qatlashub.github.io/ExperimentalAPI.jl/dev/observing/#Recording:-counts,-paths-and-time)
+counts how often a run entered each mark, by which paths, and how much of the run it was — exactly,
+without emitting anything the flag above does not already emit.
+[`reach(f, T)`](https://qatlashub.github.io/ExperimentalAPI.jl/dev/analysing/) asks the other
+question, before running anything: what a caller depends on without naming it. Its answer is
+three-valued, because Julia's call graph is not closed — `:depends`, `:clean`, and `:unknown` for
+a call site that cannot be pinned to a method. Reporting that third case as `:clean` would not be
+a weaker claim, it would be a false one.
+
 ## Install
 
 ```julia
@@ -55,13 +65,17 @@ pkg> add https://github.com/QAtlasHub/ExperimentalAPI.jl
 
 [Declaring](https://qatlashub.github.io/ExperimentalAPI.jl/dev/declaring/) ·
 [Observing](https://qatlashub.github.io/ExperimentalAPI.jl/dev/observing/) ·
+[Analysing](https://qatlashub.github.io/ExperimentalAPI.jl/dev/analysing/) ·
 [Checking](https://qatlashub.github.io/ExperimentalAPI.jl/dev/checking/) ·
 [Release decisions](https://qatlashub.github.io/ExperimentalAPI.jl/dev/releases/) ·
 [Adopting it](https://qatlashub.github.io/ExperimentalAPI.jl/dev/adopting/) ·
 [API](https://qatlashub.github.io/ExperimentalAPI.jl/dev/api/)
 
-`test/spec/` is the specification for the propagation and profiling work that is not built yet,
-written as tests so it cannot drift from the code.
+`test/spec/` is the specification, written as tests before the implementation so it could not
+drift from the code — 176 behaviours across ten files, all of them live assertions. Its
+[README](test/spec/README.md) records the negative control each group has, the two requirements
+that were withdrawn and why one of them could not be met, and the four defects the exercise found
+in the shipped code.
 
 ## Development
 

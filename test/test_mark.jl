@@ -150,6 +150,28 @@ end
     @test mark(Rewritten, :g).reason == "second reading, after a re-include"
 end
 
+module Foreign
+using ExperimentalAPI
+struct Widget end
+# A qualified definition names a method, not a surface: `Base.show` stays Base's.
+@experimental "printing format not settled" Base.show(io::IO, ::Widget) = print(io, "W")
+end
+
+@testset "a qualified definition marks the method, not the foreign name" begin
+    ms = ExperimentalAPI.experimental_methods(Foreign)
+    @test length(ms) == 1
+    @test ms[1].name === :show
+    @test ms[1].mod === Foreign                       # stored where the method was written
+    @test ms[1].sig === Tuple{typeof(show),IO,Foreign.Widget}
+    @test ExperimentalAPI.isexperimental(which(show, Tuple{IO,Foreign.Widget}))
+    # Control: one dependent must not be able to label a whole generic unfinished.
+    @test !ExperimentalAPI.isexperimental(Base, :show)
+    @test !ExperimentalAPI.isexperimental(which(show, Tuple{IO,Int}))
+    # …and it is not reported as a dangling promise about `Foreign`'s own surface.
+    @test isempty(ExperimentalAPI.audit(Foreign; methods=false).dangling)
+    @test sprint(show, Foreign.Widget()) == "W"
+end
+
 @testset "a module with no marks answers, it does not fail" begin
     @test isempty(experimental(Base))
     @test mark(Base, :sum) === nothing
@@ -162,10 +184,11 @@ end
     using ExperimentalAPI
     @experimental "why" @doc "x" f(x) = x
     end
-    # A qualified definition adds a method to a name this module does not own.
+    # A qualified name with no signature would mark every method of `Base.sum` in the world,
+    # including ones this module never wrote. Guessing is worse than refusing.
     @test_throws LoadError @eval module R2
     using ExperimentalAPI
-    @experimental "why" Base.sum(x::Int) = x
+    @experimental "why" Base.sum
     end
     # The reason is not optional, and forgetting it is caught rather than read as a name.
     @test_throws LoadError @eval module R3
@@ -196,7 +219,7 @@ end
     err = try
         @eval module R6
         using ExperimentalAPI
-        @experimental "why" Base.sum(x::Int) = x
+        @experimental "why" Base.sum
         end
         nothing
     catch e
@@ -204,7 +227,7 @@ end
     end
     @test err isa LoadError
     msg = sprint(showerror, err.error)
-    @test occursin("another module", msg)
+    @test occursin("WHICH method", msg)
 
     err2 = try
         @eval module R7

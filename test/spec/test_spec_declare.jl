@@ -1,7 +1,8 @@
 # What can carry a mark: function, method, struct, const, module, macro, extension.
 #
-# Scope: both what the name-keyed implementation does today (plain `@test`) and the method-level
-# unit it has to become (`@test_broken`).
+# Scope: both units. A mark names something, and — when it attached to a definition — also records
+# the signature it attached to, so the same declaration answers `audit`'s question about the name
+# and `reach`'s question about the method.
 
 using ExperimentalAPI: ExperimentalAPI, @experimental, Mark, experimental, isexperimental
 using Test
@@ -109,16 +110,19 @@ end
 #
 # `Declared.energy` has three methods; marking the name marks all three, including the exact one.
 
-@testset "marking a name is the wrong unit when the name has many methods" begin
+@testset "the name is the wrong unit when the name has many methods" begin
     @test length(methods(Declared.energy)) == 3
-    # Today the statement is about the name, so it over-claims.
-    @test !isexperimental(Declared, :energy)   # not marked at all yet — see below
+    # Nothing is marked here yet, so the three assertions below start from a clean fixture.
+    @test !isexperimental(Declared, :energy)
 end
 
 @testset "a single dispatch path can be marked" begin
     m = which(Declared.energy, Tuple{Declared.Numerical,Float64})
-    @test_broken ExperimentalAPI.mark(m) isa Mark
-    @test_broken ExperimentalAPI.isexperimental(m)
+    @test ExperimentalAPI.mark_method!(m, "extrapolated below β ≈ 0.1") isa Mark
+    @test ExperimentalAPI.mark(m) isa Mark
+    @test ExperimentalAPI.isexperimental(m)
+    # The record knows the signature it is about, which is what makes it narrower than the name.
+    @test ExperimentalAPI.mark(m).sig === m.sig
 end
 
 @testset "marking one method leaves its siblings alone" begin
@@ -126,21 +130,33 @@ end
     exact = which(Declared.energy, Tuple{Declared.Exact,Float64})
     rational = which(Declared.energy, Tuple{Declared.Numerical,Rational})
     @test numerical !== exact !== rational
-    @test_broken ExperimentalAPI.isexperimental(numerical)
-    @test_broken !ExperimentalAPI.isexperimental(exact)
-    @test_broken !ExperimentalAPI.isexperimental(rational)
+    @test ExperimentalAPI.isexperimental(numerical)
+    @test !ExperimentalAPI.isexperimental(exact)
+    @test !ExperimentalAPI.isexperimental(rational)
 end
 
-@testset "a method mark survives precompilation" begin
-    # Scope: the name-keyed registry already survives (`test/test_precompile.jl`); whether
-    # `Method` objects do is a separate claim needing its own fixture package.
-    @test_broken ExperimentalAPI.experimental_methods isa Function
+@testset "a method mark is stored where a name mark is, and comes back with one" begin
+    # Scope: the name-keyed registry already survives precompilation (`test/test_precompile.jl`),
+    # and a method mark is a record in the same vector — a signature is serialisable where a
+    # `Method` object would not have been.
+    @test ExperimentalAPI.experimental_methods isa Function
+    ms = ExperimentalAPI.experimental_methods(Declared)
+    @test :energy in [mk.name for mk in ms]
+    @test all(mk -> mk.mod === Declared, ms)
+    @test ExperimentalAPI.mark(Declared, :energy) !== nothing
 end
 
 @testset "a method mark is queryable from a call site" begin
-    @test_broken ExperimentalAPI.isexperimental(
+    @test ExperimentalAPI.isexperimental(
         which(Declared.energy, Tuple{Declared.Numerical,Float64})
     )
+end
+
+@testset "…but the marked NAME is still a promise, because a sibling is unmarked" begin
+    # The direction a method-level mark must not leak: one unvalidated dispatch path is not a
+    # licence to remove `energy`. `stable` keeps a name until every method behind it is marked.
+    @test :energy in ExperimentalAPI.stable(Declared)
+    @test :short_fn ∉ ExperimentalAPI.stable(Declared)   # one method, and it is marked
 end
 
 # ── extensions ───────────────────────────────────────────────────────────────────────────────
@@ -151,12 +167,14 @@ end
 @testset "a mark inside a package extension is reachable from the parent" begin
     ext = Base.get_extension(ExperimentalAPI, :ExperimentalAPITestExt)
     @test ext !== nothing
-    # Not `!isempty(...)`: this package marks six of its own names, so an ignored keyword would
-    # satisfy that. The claim is that a mark whose home is the extension comes back.
-    @test isempty(ExperimentalAPI.experimental(ext))          # today the extension declares none
-    @test_broken any(
+    # Not `!isempty(...)`: this package marks several of its own names, so an ignored keyword
+    # would satisfy that. The claim is that a mark whose home is the EXTENSION comes back.
+    @test !isempty(ExperimentalAPI.experimental(ext))
+    @test any(
         mk -> mk.mod === ext, ExperimentalAPI.experimental(ExperimentalAPI; extensions=true)
     )
+    # Control: without the keyword it does not, so the keyword is doing the work.
+    @test !any(mk -> mk.mod === ext, ExperimentalAPI.experimental(ExperimentalAPI))
 end
 
 @testset "every new Audit field keeps the partition invariant" begin
@@ -166,11 +184,17 @@ end
     @test sort(
         vcat(a.foreign, a.documented, a.unaccounted, setdiff(a.declared, a.documented))
     ) == a.surface
-    @test_broken ExperimentalAPI.partition_holds(a) === true
+    @test ExperimentalAPI.partition_holds(a) === true
 end
 
 @testset "auditing a package does not silently ignore its extensions" begin
     a = ExperimentalAPI.audit(ExperimentalAPI)
-    # Scope: `audit` looks at one module today; whether extensions are included must be stated.
-    @test_broken hasproperty(a, :extensions)
+    # Stated rather than silent: an extension is a separate module, so it is REPORTED and audited
+    # in its own right rather than folded in — an extension that is not loaded is not missing, it
+    # is inapplicable.
+    @test hasproperty(a, :extensions)
+    @test Base.get_extension(ExperimentalAPI, :ExperimentalAPITestExt) in a.extensions
+    @test ExperimentalAPI.audit(
+        only(filter(x -> nameof(x) === :ExperimentalAPITestExt, a.extensions))
+    ) isa ExperimentalAPI.Audit
 end

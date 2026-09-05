@@ -41,10 +41,18 @@ end
 
 function _walk(f, x)
     f(x)
-    x isa Expr && for a in x.args
+    x isa Expr && !_isdefinition(x) && for a in x.args
         _walk(f, a)
     end
     return nothing
+end
+
+# A `@testset` written inside a helper function is machinery, not a claim: the gate probes in
+# `test_spec_integration.jl` run `test_surface` under a test set that records instead of
+# propagating, and counting those as behaviours reported five claims that nobody wrote.
+function _isdefinition(x::Expr)
+    x.head === :function && return true
+    return x.head === :(=) && x.args[1] isa Expr && x.args[1].head in (:call, :where, :(::))
 end
 
 _count(pred, x) = (n=0; _walk(y -> (pred(y) && (n += 1)), x); n)
@@ -56,8 +64,9 @@ What one spec file contains. `operating` and `specified` partition `behaviours`:
 either runs at least one assertion against the package today, or it is entirely `@test_broken` —
 a claim written down and not yet checked against anything.
 
-The distinction is the point: "every group has a negative control" is true of this directory as a
-specification and false of it as a running suite.
+The whole directory is `operating` now, and the split earns its place going the other way: it is
+the ratchet. A behaviour added as `@test_broken`, or one demoted back to it, moves the number that
+`test/test_spec_table.jl` pins, and the suite says so.
 """
 struct Counts
     behaviours::Int

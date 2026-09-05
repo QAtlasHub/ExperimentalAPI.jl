@@ -18,9 +18,12 @@ public kw_fn, where_fn, vararg_fn, ret_typed, Callable, Ctor, INTERP
 @experimental "varargs" vararg_fn(x, rest...) = x
 @experimental "return type annotation" ret_typed(x)::Float64 = x
 
-struct Callable
+# A marked type covers the constructors it implies: `MarkedStruct(x)` is a call, and an analysis
+# that only looked at named functions would report constructing one as clean.
+@experimental "the call operator's scaling rule is provisional" struct Callable
     k::Float64
 end
+(c::Callable)(x) = c.k * x
 struct Ctor
     v::Int
 end
@@ -49,9 +52,10 @@ end
 
 # ── forms that are not covered ───────────────────────────────────────────────────────────────
 
-@testset "a callable struct is marked on the WRONG symbol today" begin
-    # `(c::C)(x)` has no function name; `_signame` walks the `::` and returns the argument name.
-    # The mark lands on `:c`, which is not a binding anywhere.
+@testset "a callable struct is marked on the type" begin
+    # `(c::C)(x)` has no function name. Reading the argument name out of the `::` is what the
+    # first implementation did, and it produced a mark on `:c` — a local that is not a binding
+    # anywhere. The name a reader recognises is the TYPE.
     @eval module CallableMarked
     using ExperimentalAPI
     struct C
@@ -59,14 +63,20 @@ end
     end
     @experimental "scaling rule provisional" (c::C)(x) = c.k * x
     end
-    @test :c in [mk.name for mk in experimental(CallableMarked)]     # today, and wrong
-    @test !isdefined(CallableMarked, :c)                             # marks a non-binding
+    got = [mk.name for mk in experimental(Main.CallableMarked)]
+    @test :C in got
+    @test :c ∉ got                                       # the argument name, and it was the bug
+    @test !isdefined(Main.CallableMarked, :c)
+    # …and the mark is about the call operator, not about the constructor.
+    @test ExperimentalAPI.mark(Main.CallableMarked, :C).sig ===
+        Tuple{Main.CallableMarked.C,Any}
 end
 
-@testset "and the audit compounds it: C is reported as UNDECLARED" begin
-    # The second wrong signal: the audit reports a declaration for a name that does not exist AND
-    # a public name with no declaration, so it tells the author to declare what that line already
-    # declares. Both halves have to move together.
+@testset "…and the audit reports neither a dangling mark nor an undeclared name" begin
+    # The compounding failure the fix has to clear: a mark on `:c` made the audit report a
+    # declaration for a name that does not exist AND a public name with no declaration, so it
+    # told the author to go and declare the very thing that line declares. Both halves move
+    # together, so both are checked together.
     @eval module CallablePublic
     using ExperimentalAPI
     public C
@@ -75,22 +85,11 @@ end
     end
     @experimental "scaling rule provisional" (c::C)(x) = c.k * x
     end
-    a = ExperimentalAPI.audit(Main.CallablePublic)
-    @test :c in a.dangling          # declared, but no such binding
-    @test :C in a.unaccounted       # public, and — per the audit — never declared
-    @test Main.CallablePublic.C(2.0)(3.0) == 6.0   # the definition itself is fine; the mark is not
-end
-
-@testset "a callable struct marks the type, or refuses" begin
-    # Either answer is defensible; the argument name is not.
-    @test_broken :C in [mk.name for mk in experimental(Main.CallableMarked)]
-end
-
-@testset "…and fixing that clears BOTH signals" begin
-    # `_signame` returning `:C` is necessary but not sufficient — the audit is what the author
-    # reads.
-    a = ExperimentalAPI.audit(Main.CallablePublic)
-    @test_broken isempty(a.dangling) && :C ∉ a.unaccounted
+    a = ExperimentalAPI.audit(Main.CallablePublic; methods=false)
+    @test isempty(a.dangling)
+    @test :C ∉ a.unaccounted
+    @test :C in a.declared
+    @test Main.CallablePublic.C(2.0)(3.0) == 6.0
 end
 
 @testset "a constructor method is marked on the type" begin
@@ -108,16 +107,22 @@ end
     @test :s ∉ got
 end
 
-@testset "an inner constructor inside a marked struct is not separately marked" begin
-    # Included or excluded is a decision; silence is not.
-    @test_broken hasproperty(mark(FormsSpec, :Callable), :includes_constructors)
+@testset "a marked type covers its constructors, and says so" begin
+    # Included or excluded is a decision; silence is not. Included: `MarkedStruct(x)` is a call,
+    # and an analysis that treated construction as unmarked would report building one as clean.
+    mk = mark(FormsSpec, :Callable)
+    @test hasproperty(mk, :includes_constructors)
+    @test mk.includes_constructors === true
+    @test ExperimentalAPI.isexperimental(which(FormsSpec.Callable, Tuple{Float64}))
+    # Control: a mark attached to a function covers no constructor, because there is none.
+    @test mark(FormsSpec, :kw_fn).includes_constructors === false
 end
 
 @testset "an operator method can be marked" begin
     # Each ends in a Bool and checks what was marked: `@eval module` returns a Module, which
     # reports "non-Boolean" instead of the Unexpected Pass this directory relies on, and accepting
     # the syntax while recording the wrong symbol is the defect above.
-    @test_broken begin
+    @test begin
         @eval module OpMarked
         using ExperimentalAPI
         struct V
@@ -130,7 +135,7 @@ end
 end
 
 @testset "a generated function can be marked" begin
-    @test_broken begin
+    @test begin
         @eval module GenMarked
         using ExperimentalAPI
         @experimental "generator is a prototype" @generated g(x) = :(x)
@@ -142,7 +147,7 @@ end
 @testset "Base.@kwdef stacks with the mark" begin
     # Two macros that both wrap a definition must compose in at least one order, and which one
     # must be documented.
-    @test_broken begin
+    @test begin
         @eval module KwdefMarked
         using ExperimentalAPI
         @experimental "defaults are guesses" Base.@kwdef struct S
@@ -154,7 +159,7 @@ end
 end
 
 @testset "@inline and the mark compose in both orders" begin
-    @test_broken begin
+    @test begin
         @eval module InlineMarked
         using ExperimentalAPI
         @experimental "kernel unverified" @inline f(x) = x
@@ -166,11 +171,13 @@ end
 
 @testset "a definition produced by @eval can be marked by name" begin
     # Metaprogrammed definitions cannot be attached to, so the name-list form must reach them.
-    @test_broken begin
+    @test begin
         @eval module EvalMarked
         using ExperimentalAPI
+        # Built with `Expr` rather than `@eval $n(...)`: inside an `@eval module` the outer
+        # macro interpolates `$n` first, where `n` does not exist yet.
         for n in (:a, :b)
-            @eval $n(x) = x
+            Core.eval(@__MODULE__, Expr(:(=), Expr(:call, n, :x), :x))
         end
         @experimental "generated in a loop" a b
         end
@@ -219,9 +226,22 @@ end
     @test !occursin("mark.jl", msg)
 end
 
-@testset "the refusal names @experimental rather than leaking the emitted const" begin
-    # The message still names a `const` the author never wrote. Whether this is reachable is
-    # open: the only expansion avoiding `const` is `global`, which fails silently in local scope.
+@testset "the refusal cannot name @experimental, and that is now a decision" begin
+    # WITHDRAWN, with the measurement that withdrew it. The requirement was that the message name
+    # `@experimental`. It cannot, and the three routes are exhausted:
+    #
+    #   * `const` in local scope fails during LOWERING, before any emitted code runs, so no check
+    #     of ours can intercept it — and Julia's message does not name the variable either, so
+    #     naming the binding `var"@experimental ..."` does not smuggle the word in. Measured on
+    #     1.12.2: the message is byte-identical for `:__EXPERIMENTAL_API_MARKS__` and for a
+    #     binding whose name is the whole sentence.
+    #   * `global`, the one expansion that avoids `const`, fails SILENTLY in local scope — a
+    #     worse outcome than a loud message pointing at the wrong vocabulary.
+    #   * creating the registry through `Core.eval` removes the error altogether, which turns a
+    #     refusal into a mark registered when the enclosing function is first called.
+    #
+    # What is kept is the part that is in this package's hands and is asserted above: the blame
+    # lands on the line the author wrote, and never inside this package.
     e = try
         @eval module ClosureMarked2
         using ExperimentalAPI
@@ -234,14 +254,17 @@ end
     catch err
         err
     end
-    @test_broken occursin("@experimental", sprint(showerror, e))
+    msg = sprint(showerror, e isa LoadError ? e.error : e)
+    @test occursin("unsupported `const` declaration", msg)
+    @test !occursin("mark.jl", msg)
 end
 
 # ── metadata ─────────────────────────────────────────────────────────────────────────────────
 
 @testset "since must be a version, and the refusal must say so" begin
-    # Refused by accident: the field's conversion fails, with a message naming neither `since`
-    # nor `@experimental`. A deliberate check would also throw, so assert the diagnostic.
+    # Refused by a check rather than by accident. The first implementation let the field's own
+    # conversion fail, which threw a `MethodError` naming neither `since` nor `@experimental` —
+    # a refusal the author cannot act on is barely better than none.
     e = try
         @eval module BadSince
         using ExperimentalAPI
@@ -251,8 +274,12 @@ end
     catch err
         err isa LoadError ? err.error : err
     end
-    @test e isa MethodError                                   # today, and accidental
-    @test_broken occursin("since", sprint(showerror, e))
+    @test e isa ArgumentError
+    msg = sprint(showerror, e)
+    @test occursin("since", msg)
+    @test occursin("VersionNumber", msg)
+    # …and it says what to write instead, which is the whole difference from the MethodError.
+    @test occursin("v\"0.4.0\"", msg)
 end
 
 @testset "an unknown keyword is refused rather than ignored" begin
@@ -264,8 +291,24 @@ end
 end
 
 @testset "tracking is carried through to every report" begin
-    # Stored today; it has to survive into the audit and the record as well.
-    @test_broken ExperimentalAPI.audit(FormsSpec).tracking isa AbstractDict
+    # Stored is not enough: it has to survive into the audit, and into the note the docs render.
+    @test ExperimentalAPI.audit(FormsSpec; methods=false).tracking isa AbstractDict
+    @eval module Tracked
+    using ExperimentalAPI
+    public f
+    "Documented."
+    @experimental(
+        "shape undecided", tracking = "https://example.invalid/issues/3", f(x) = x
+    )
+    end
+    a = ExperimentalAPI.audit(Main.Tracked; methods=false)
+    @test a.tracking[:f] == "https://example.invalid/issues/3"
+    @test occursin(
+        "example.invalid/issues/3", ExperimentalAPI.docstring_note(Main.Tracked, :f)
+    )
+    # Control: a mark with no tracking link contributes no entry, so the table is not a list of
+    # every mark with a blank beside most of them.
+    @test :kw_fn ∉ keys(ExperimentalAPI.audit(FormsSpec; methods=false).tracking)
 end
 
 # Evaluate an expression in a fresh module and hand back the exception it raised, unwrapped.
@@ -325,14 +368,14 @@ end
     end
 end
 
-@testset "a non-string reason is refused by accident, not by a check" begin
-    # Refused by `strip` failing inside `_reason`, with a message naming neither `@experimental`
-    # nor `reason`. Same shape as the `since` case above.
+@testset "a non-string reason is refused by a check, and the check says why" begin
+    # Same shape as the `since` case: letting `strip` fail inside `_reason` also refused it, with
+    # a `MethodError` naming neither `@experimental` nor `reason`.
     for r in (:(:sym), 42)
         @testset "reason=$(repr(r))" begin
             e = probe(:(@experimental $r f(x) = x))
-            @test e isa MethodError                       # today, and accidental
-            @test_broken occursin("reason", sprint(showerror, e))
+            @test e isa ArgumentError
+            @test occursin("reason", sprint(showerror, e))
         end
     end
 end
@@ -343,7 +386,7 @@ end
     e = probe(:(@experimental f(x) = x))
     @test e isa ArgumentError
     @test occursin("nothing to mark", sprint(showerror, e))        # today, and misleading
-    @test_broken occursin("reason", sprint(showerror, e))
+    @test occursin("reason", sprint(showerror, e))
 end
 
 @testset "nothing is marked when the macro refuses" begin
@@ -388,6 +431,13 @@ end
 end
 
 @testset "the replacement is reported rather than silent" begin
-    # Last-write-wins is a decision, and it should be visible.
-    @test_broken ExperimentalAPI.superseded_marks isa Function
+    # Last-write-wins is a decision, and it should be visible: a reason that was overwritten is
+    # exactly the thing a reader cannot reconstruct from the source they are looking at.
+    @test ExperimentalAPI.superseded_marks isa Function
+    sup = ExperimentalAPI.superseded_marks(A3)
+    @test length(sup) == 1
+    @test sup[1].reason == "first"
+    # Control: a module whose marks were never replaced records nothing, so the log is not just
+    # a copy of the registry.
+    @test isempty(ExperimentalAPI.superseded_marks(FormsSpec))
 end

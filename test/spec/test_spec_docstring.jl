@@ -100,8 +100,12 @@ end
 
 @testset "the reason is reachable from the rendered documentation" begin
     # Scope: the reason must reach the docs site without the author typing it twice.
-    @test_broken ExperimentalAPI.docstring_note(Both, :documented_and_marked) isa
-        AbstractString
+    note = ExperimentalAPI.docstring_note(Both, :documented_and_marked)
+    @test note isa AbstractString
+    @test occursin("convergence not established at low β", note)
+    # Control: a settled name gets no note, so a renderer built on this cannot annotate
+    # everything.
+    @test ExperimentalAPI.docstring_note(Both, :documented_only) === nothing
 end
 
 @testset "what Documenter's checkdocs sees is not what audit sees" begin

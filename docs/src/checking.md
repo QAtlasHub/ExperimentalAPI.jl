@@ -76,7 +76,12 @@ it had none:
   cannot tell you that you should have.
 - **Prose quality.** A docstring reading `TODO` counts as documented. [`isdocumented`](@ref)
   asks whether prose exists, never whether it is any good.
-- **Methods added to another package's function.** They are not in `names(m)` and never will be.
+- **Methods added to another package's function** are not in `names(m)` and never will be —
+  which is why the audit has a second half. [`contributed_methods`](@ref) finds them,
+  [`unaccounted_methods`](@ref) reports the ones with neither a docstring nor a mark, and
+  [`test_surface`](@ref) asserts on them. For a package whose surface *is* such methods —
+  `fetch(model, quantity)` with 570 of them — a clean name audit reports nothing while having
+  looked at none of them.
 - **Names public only inside an extension**, which is a separate module — audit it separately, or
   avoid the blind spot the way this package does: declare the function and its docstring in the
   parent (`function test_surface end` in `src/ExperimentalAPI.jl`) and let the extension add only
@@ -99,4 +104,55 @@ contradiction. What `test_surface` adds is `foreign` (a re-exported name whose p
 else's job) and `dangling` (a mark on a name that was never made public), neither of which
 Documenter has a notion of.
 
-Run both. Neither is a looser version of the other.
+Run both. Neither is a looser version of the other, and
+[`aqua_compatible_names`](@ref) computes the difference between them so a project running both can
+see exactly which names it would have to argue about. Empty means the two agree.
+
+## The method-level half
+
+```julia
+julia> audit(Downstream).contributed_methods
+4-element Vector{Method}:
+ fetch_value(::Ising, ::Energy) …
+ ⋮
+
+julia> unaccounted_methods(Downstream)      # neither a docstring nor a mark
+2-element Vector{Method}:
+ ⋮
+```
+
+Docstrings are keyed by signature, so [`isdocumented`](@ref)`(::Method)` is a real question and
+not the same one as [`isdocumented`](@ref)`(m, :name)`. Only the module that *wrote* the method is
+asked: the generic's own docstring upstream has the key `Tuple{Any, Any}`, and letting it count
+would make one docstring account for all 570 methods anybody ever contributed.
+
+[`test_surface`](@ref) asserts on these with `require_methods = :foreign` by default — methods on
+another *package's* generic, not on Base's. `Base.show(io, ::Audit)` implements a protocol whose
+documentation is Base's, and a default that reported every `show`, `==` and `getindex` method as a
+finding is a default that gets switched off wholesale. [`extends_base`](@ref) is the rule, stated
+as "who owns the generic" rather than as a list of interface functions — a list is not closed
+under the ones Julia adds next. `require_methods = :all` widens it.
+
+## How well is any of it exercised?
+
+The mark records where it was written, and `--code-coverage` records a count per line. Joining the
+two answers the worst case a marked definition can be in:
+
+```julia
+julia> unverified(MyPackage)          # marked AND never executed by the suite
+1-element Vector{ExperimentalAPI.Mark}:
+ Mark(MyPackage.never_called, "shipped without ever being called")
+
+julia> coverage(MyPackage, :half_exercised)
+0.6
+```
+
+[`coverage`](@ref) answers `missing`, never `0.0`, when the run has no coverage data: a run
+without `--code-coverage` has nothing to say, and reporting zero would flag every marked
+definition in every ordinary run. The counters are flushed from the running process rather than
+read from the files Julia writes at exit, because a test that has to wait for the process to end
+cannot assert anything.
+
+[`stale_marks`](@ref) is the check that keeps the join honest: an edit above a definition moves
+the code and not the record, and every downstream reader of `mk.line` then describes the wrong
+lines silently.

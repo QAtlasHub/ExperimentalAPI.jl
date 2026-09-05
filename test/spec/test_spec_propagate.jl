@@ -107,58 +107,55 @@ end
 # `NamedTuple` with the right field names satisfies every assertion in four files.
 
 @testset "the result has a type, not just field names" begin
-    @test_broken ExperimentalAPI.reach(Chain.top_bad, ENTRY) isa ExperimentalAPI.Reach
+    @test ExperimentalAPI.reach(Chain.top_bad, ENTRY) isa ExperimentalAPI.Reach
 end
 
 @testset "verdict is derived, never stored" begin
     # A stored `verdict` makes `:clean` with a non-empty `.unresolved` representable, which is
     # the one state this file forbids. Same rule as `isbreaking(d::Diff)`.
-    @test_broken !hasproperty(ExperimentalAPI.reach(Chain.top_bad, ENTRY), :verdict)
+    @test !hasproperty(ExperimentalAPI.reach(Chain.top_bad, ENTRY), :verdict)
 end
 
 @testset "a boolean gate exists alongside the three-valued answer" begin
     # Every other verdict here is a named predicate, never a comparison the caller writes out.
-    @test_broken ExperimentalAPI.isclean(ExperimentalAPI.reach(Chain.top_good, ENTRY)) ===
-        true
-    @test_broken ExperimentalAPI.isclean(ExperimentalAPI.reach(Chain.top_bad, ENTRY)) ===
-        false
+    @test ExperimentalAPI.isclean(ExperimentalAPI.reach(Chain.top_good, ENTRY)) === true
+    @test ExperimentalAPI.isclean(ExperimentalAPI.reach(Chain.top_bad, ENTRY)) === false
 end
 
 @testset ":unknown absorbs when results are combined" begin
     # `reach(Module)` folds every public entry into one answer, so the algebra must exist: one
     # `:unknown` is not clean whatever the others say, and folding is order-independent.
-    @test_broken ExperimentalAPI.combine(:clean, :unknown) === :unknown
-    @test_broken ExperimentalAPI.combine(:depends, :unknown) === :depends
-    @test_broken ExperimentalAPI.combine(:clean, :depends) === :depends
-    @test_broken ExperimentalAPI.combine(:clean, :clean) === :clean
-    @test_broken ExperimentalAPI.combine(:unknown, :clean) ===
+    @test ExperimentalAPI.combine(:clean, :unknown) === :unknown
+    @test ExperimentalAPI.combine(:depends, :unknown) === :depends
+    @test ExperimentalAPI.combine(:clean, :depends) === :depends
+    @test ExperimentalAPI.combine(:clean, :clean) === :clean
+    @test ExperimentalAPI.combine(:unknown, :clean) ===
         ExperimentalAPI.combine(:clean, :unknown)
 end
 
 # ── the core claim ───────────────────────────────────────────────────────────────────────────
 
 @testset "a caller two hops away is reported as depending" begin
-    @test_broken ExperimentalAPI.verdict(ExperimentalAPI.reach(Chain.top_bad, ENTRY)) ===
-        :depends
-    @test_broken :unstable in
-        [mk.name for mk in ExperimentalAPI.reach(Chain.top_bad, ENTRY).reached]
+    @test ExperimentalAPI.verdict(ExperimentalAPI.reach(Chain.top_bad, ENTRY)) === :depends
+    # `.reached` holds `Reached`, which pairs the mark with the method and the path it was
+    # reached by — the name alone would not say through which of the caller's own code.
+    @test :unstable in
+        [r.mark.name for r in ExperimentalAPI.reach(Chain.top_bad, ENTRY).reached]
 end
 
 @testset "an equally deep caller with nothing marked is reported clean" begin
     # Control: rejects a tool that always says `:depends`.
-    @test_broken ExperimentalAPI.verdict(ExperimentalAPI.reach(Chain.top_good, ENTRY)) ===
-        :clean
-    @test_broken isempty(ExperimentalAPI.reach(Chain.top_good, ENTRY).reached)
+    @test ExperimentalAPI.verdict(ExperimentalAPI.reach(Chain.top_good, ENTRY)) === :clean
+    @test isempty(ExperimentalAPI.reach(Chain.top_good, ENTRY).reached)
 end
 
 @testset "a function passed as a value is still followed" begin
     # Specialisation on `typeof(f)` resolves this; it is not a dynamic hole.
-    @test_broken ExperimentalAPI.verdict(ExperimentalAPI.reach(Chain.top_arg, ENTRY)) ===
-        :depends
+    @test ExperimentalAPI.verdict(ExperimentalAPI.reach(Chain.top_arg, ENTRY)) === :depends
 end
 
 @testset "@nospecialize does not hide the callee" begin
-    @test_broken ExperimentalAPI.verdict(
+    @test ExperimentalAPI.verdict(
         ExperimentalAPI.reach(Chain.top_nospec, Tuple{typeof(Chain.unstable),Float64})
     ) === :depends
 end
@@ -167,26 +164,24 @@ end
 
 @testset "an abstract-typed callee field is :unknown, NOT :clean" begin
     # `Holder.f::Function` can hold `unstable`, so `:clean` here is a lie.
-    @test_broken ExperimentalAPI.verdict(
+    @test ExperimentalAPI.verdict(
         ExperimentalAPI.reach(Chain.top_field, Tuple{Chain.Holder,Float64})
     ) === :unknown
-    @test_broken !isempty(
+    @test !isempty(
         ExperimentalAPI.reach(Chain.top_field, Tuple{Chain.Holder,Float64}).unresolved
     )
 end
 
 @testset "a run-time table lookup is :unknown, NOT :clean" begin
-    @test_broken ExperimentalAPI.verdict(
+    @test ExperimentalAPI.verdict(
         ExperimentalAPI.reach(Chain.top_table, Tuple{Int,Float64})
     ) === :unknown
-    @test_broken !isempty(
-        ExperimentalAPI.reach(Chain.top_table, Tuple{Int,Float64}).unresolved
-    )
+    @test !isempty(ExperimentalAPI.reach(Chain.top_table, Tuple{Int,Float64}).unresolved)
 end
 
 @testset "every unresolved site says where it is" begin
     # "cannot tell" is actionable only if the user can go and look.
-    @test_broken all(
+    @test all(
         u -> hasproperty(u, :file) && hasproperty(u, :line),
         ExperimentalAPI.reach(Chain.top_field, Tuple{Chain.Holder,Float64}).unresolved,
     )
@@ -195,24 +190,23 @@ end
 @testset "a depth limit reports :unknown rather than :clean" begin
     # `:unknown` rather than `!== :clean`: the latter cannot separate "the limit truncated" from
     # "the limit was ignored and the mark was found anyway".
-    @test_broken ExperimentalAPI.verdict(
+    @test ExperimentalAPI.verdict(
         ExperimentalAPI.reach(Chain.deep_1, ENTRY; maxdepth=2)
     ) === :unknown
     # …and without the limit it is found, so the fixture can disagree.
-    @test_broken ExperimentalAPI.verdict(ExperimentalAPI.reach(Chain.deep_1, ENTRY)) ===
-        :depends
+    @test ExperimentalAPI.verdict(ExperimentalAPI.reach(Chain.deep_1, ENTRY)) === :depends
 end
 
 # ── termination ──────────────────────────────────────────────────────────────────────────────
 
 @testset "self-recursion terminates and still finds the mark" begin
-    @test_broken ExperimentalAPI.verdict(
+    @test ExperimentalAPI.verdict(
         ExperimentalAPI.reach(Chain.top_recursive, Tuple{Int,Float64})
     ) === :depends
 end
 
 @testset "mutual recursion terminates" begin
-    @test_broken ExperimentalAPI.verdict(
+    @test ExperimentalAPI.verdict(
         ExperimentalAPI.reach(Chain.top_mutual_a, Tuple{Int,Float64})
     ) === :depends
 end
@@ -222,27 +216,25 @@ end
 @testset "a marked const is seen where it is used" begin
     # A const is not a call site. Either the analysis reads globals out of the IR, or the case is
     # declared out of scope — what it must not do is report `:clean`.
-    @test_broken ExperimentalAPI.verdict(
-        ExperimentalAPI.reach(Chain.top_uses_const, ENTRY)
-    ) !== :clean
+    @test ExperimentalAPI.verdict(ExperimentalAPI.reach(Chain.top_uses_const, ENTRY)) !==
+        :clean
 end
 
 @testset "a marked struct is seen at construction" begin
-    @test_broken ExperimentalAPI.verdict(
-        ExperimentalAPI.reach(Chain.top_constructs, ENTRY)
-    ) === :depends
+    @test ExperimentalAPI.verdict(ExperimentalAPI.reach(Chain.top_constructs, ENTRY)) ===
+        :depends
 end
 
 @testset "marking a module marks what it contains" begin
     # Or it does not, stated. Either way a decision, not an omission.
-    @test_broken hasproperty(ExperimentalAPI.reach(Chain.top_bad, ENTRY), :through_modules)
+    @test hasproperty(ExperimentalAPI.reach(Chain.top_bad, ENTRY), :through_modules)
 end
 
 # ── across packages ──────────────────────────────────────────────────────────────────────────
 
 @testset "a mark in a dependency propagates into the dependent" begin
     # Needs the fixture package, so only the API shape is pinned here.
-    @test_broken ExperimentalAPI.reach isa Function
+    @test ExperimentalAPI.reach isa Function
 end
 
 # ── cost ─────────────────────────────────────────────────────────────────────────────────────

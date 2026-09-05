@@ -29,15 +29,17 @@ Nobody asked for that summary. It is on by default, it carries the **reason** ra
 symbol, and a marked definition the run never entered is *absent* — not reported with a count of
 zero. The same answer is available programmatically through [`entered`](@ref).
 
-## Three things, and the first is the reason to have this
+## Five questions, and the first is the reason to have this
 
-| | |
+| question | the call |
 |---|---|
-| an **observation** | which marked definitions the run went through — [`entered`](@ref), and the summary at exit |
-| a **declaration** | the reason travels with the name, in the source, where the author is — [`@experimental`](@ref) |
-| a **check** | every public name is accounted for, or the test fails — [`audit`](@ref), [`test_surface`](@ref) |
+| did **this run** go through unvalidated code? | [`entered`](@ref) — and the summary at exit says so anyway |
+| how often, by which paths, and how much of the run? | [`record`](@ref) |
+| does this caller **depend** on something unvalidated, without naming it? | [`reach`](@ref) |
+| what is unfinished here, and which public names are undescribed? | [`experimental`](@ref), [`audit`](@ref) |
+| is dropping this name breaking? | [`compare`](@ref), [`compare_methods`](@ref) |
 
-A docstring can carry the second row. Nothing a human writes can carry the first: the question is
+A docstring can carry the fourth row. Nothing a human writes can carry the first: the question is
 not "is this name experimental" but "did *this run* go through one", and it has to be answered
 after the run, about the run.
 
@@ -59,8 +61,14 @@ it is free at eight threads while every counting scheme is not, and why the noti
 exit rather than a warning at the call.
 
 Only a definition **with a body** carries a flag; see [`@experimental`](@ref) for the
-form-by-form table. Counting, call sites and paths are a separate, opt-in layer that is not built
-yet.
+form-by-form table.
+
+Counting, call sites and paths are a separate layer, and it is opt-in for exactly the reason the
+table gives. [`record`](@ref) reaches the *same* statement from the other side: opening a block
+clears every flag, so the short-circuit fails and the write side — a function call, not an inlined
+store — does the counting. Nothing in a marked body changes; what changes is which branch of the
+one statement is taken. Counts are exact and survive inlining, which is why they come from a
+counter and not from a sampler.
 
 ## Why this is a separate axis
 
@@ -98,7 +106,8 @@ was never made public, which is the module contradicting itself.
 | every public name has a docstring | `Docs.undocumented_names`, `Aqua.test_undocumented_names` | the same requirement, not a looser one — plus `foreign` and `dangling` |
 | generating documentation | Documenter | only ever checks whether prose exists |
 | run-time behaviour | — | one short-circuit read in the body — see the table above |
-| how often a path ran | `Profile`, `@time` | not answered: the default layer knows *whether*, never how often |
+| how often a path ran | `Profile`, `@time` | answered by [`record`](@ref), which is opt-in; the default layer knows *whether*, never how often |
+| what a caller depends on | — | [`reach`](@ref), statically, with `:unknown` as an honest third answer |
 
 `@experimental` adds one statement to the body and nothing else. It does not add a method, does
 not change dispatch, and never allocates or logs.
@@ -118,6 +127,8 @@ loads `Test` because of this.
 ## Where to go next
 
 - [Declaring](@ref) — the forms `@experimental` accepts, and what it refuses
-- [Checking](@ref) — the audit, its buckets, and what it cannot see
+- [Observing](@ref) — what a run went through, and [`record`](@ref) for how often and how much
+- [Analysing](@ref) — what a caller *could* reach, and why the answer is three-valued
+- [Checking](@ref) — the audit, its buckets, the method-level half, and what it cannot see
 - [Release decisions](@ref) — saying mechanically that a change is not breaking
 - [Adopting it](@ref) — turning this on for a package that already has a backlog
