@@ -330,6 +330,14 @@ function reach_script(
             push!(body.args, st)
         elseif _is_toplevel_only(st)
             Core.eval(scratch, st)
+            # `const RESULT = simulate(model)` is a script's WORK wearing a declaration's syntax,
+            # and it is how a researcher writes the line that produces the figure. Evaluating it
+            # and stopping there analysed nothing: measured on a two-line script whose only call
+            # was a `const`, and the answer came back `:clean`. The binding still has to be made —
+            # a later `struct` may use it — so the value is computed at top level and the
+            # right-hand side is analysed as well.
+            rhs = _const_rhs(st)
+            rhs === nothing || push!(body.args, rhs)
         else
             push!(body.args, st)
         end
@@ -361,6 +369,15 @@ function _is_toplevel_only(st)
         :primitive,
         :macro,
     )
+end
+
+# The right-hand side of `const x = …`, which is the only top-level-only form that routinely
+# carries a call worth analysing.
+function _const_rhs(st)
+    st isa Expr && st.head === :const || return nothing
+    a = st.args[1]
+    (a isa Expr && a.head === :(=) && length(a.args) == 2) || return nothing
+    return a.args[2]
 end
 
 # ── the walk ─────────────────────────────────────────────────────────────────────────────────

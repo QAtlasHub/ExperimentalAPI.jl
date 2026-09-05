@@ -233,8 +233,25 @@ end
 # ── across packages ──────────────────────────────────────────────────────────────────────────
 
 @testset "a mark in a dependency propagates into the dependent" begin
-    # Needs the fixture package, so only the API shape is pinned here.
-    @test ExperimentalAPI.reach isa Function
+    # `reach isa Function` was the whole of this claim for a while, and it is satisfied by an
+    # implementation that answers `:clean` for everything. The real question is whether a mark
+    # written while ANOTHER package was precompiled — in a process that has since exited — is
+    # visible to a caller here, and that needs a package rather than a module.
+    #
+    # `test/test_precompile.jl` is where it is asked, because it is the file that owns the scratch
+    # depot and the two subprocess runs. This asserts it is asked there rather than restating it:
+    # a claim checked in one place and mentioned in another is one that goes stale in the second.
+    src = read(joinpath(@__DIR__, "..", "test_precompile.jl"), String)
+    @test occursin("REACH=", src)
+    @test occursin("\"REACH\"] == \"depends\"", src)
+    @test occursin("\"REACHCONTROL\"] == \"clean\"", src)
+
+    # What CAN be asked without a second package: the same shape across a module boundary, where
+    # the mark is in one module and the caller in another that never names it.
+    boundary(x::Float64) = Chain.top_bad(x)
+    @test ExperimentalAPI.verdict(ExperimentalAPI.reach(boundary, ENTRY)) === :depends
+    control(x::Float64) = Chain.top_good(x)
+    @test ExperimentalAPI.verdict(ExperimentalAPI.reach(control, ENTRY)) === :clean
 end
 
 # ── cost ─────────────────────────────────────────────────────────────────────────────────────
