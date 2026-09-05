@@ -68,7 +68,7 @@ Anything else is **refused with a message naming the alternative**, never guesse
 
 ```julia
 julia> @experimental "why" Base.sum(x::Int) = x
-ERROR: @experimental: `Base.sum(x::Int)` defines a name owned by another module,
+ERROR: ArgumentError: @experimental: `Base.sum` defines a name owned by another module,
 which is not part of this module's public surface
 ```
 

@@ -131,3 +131,79 @@ end
     lines = split(blocks[1][2], "\n")
     @test count(l -> endswith(rstrip(l), "\\"), lines) == 1
 end
+
+# ── the documentation pages ──────────────────────────────────────────────────────────────────
+#
+# Scope: `docs/src` gets the same treatment the README does. Twenty julia blocks were shipped
+# unexecuted, and two of them did not run — including the front page's, which is the defect the
+# registry review named for the README and which was fixed there and not here.
+
+const _DOCS = joinpath(@__DIR__, "..", "docs", "src")
+
+"Every fenced julia block under `docs/src`, as (page, index, text). Any fence width."
+function docs_blocks()
+    out = Tuple{String,Int,String}[]
+    for f in sort(readdir(_DOCS; join=true))
+        endswith(f, ".md") || continue
+        for (i, m) in enumerate(eachmatch(r"`{3,}julia\r?\n(.*?)`{3,}"s, read(f, String)))
+            push!(out, (basename(f), i, m.captures[1]))
+        end
+    end
+    return out
+end
+
+# A block is illustrative if it stands in for a package the reader supplies, and a transcript if
+# it shows a REPL session — `pkg>` as much as `julia>`, which is why the install block is here.
+function _is_illustrative(b)
+    return occursin("MyPackage", b) ||
+           occursin("MyPkg", b) ||
+           occursin("Archeion", b) ||
+           occursin("…", b)
+end
+_is_transcript(b) = occursin("julia>", b) || occursin("pkg>", b)
+
+@testset "every macro the documentation teaches exists" begin
+    blocks = docs_blocks()
+    @test !isempty(blocks)
+    @test "index.md" in [p for (p, _, _) in blocks]
+    foreign = Set([
+        Symbol("@info"), Symbol("@test"), Symbol("@testset"), Symbol("@deprecate")
+    ])
+    named = Set{Symbol}()
+    for (_, _, b) in blocks, m in eachmatch(r"@[a-zA-Z_][a-zA-Z0-9_]*", b)
+        push!(named, Symbol(m.match))
+    end
+    @test Symbol("@experimental") in named       # non-vacuity, anchored to content
+    missing_macros = sort!([
+        m for m in collect(named) if m ∉ foreign && !isdefined(ExperimentalAPI, m)
+    ])
+    @test missing_macros == Symbol[]
+end
+
+@testset "every self-contained documentation example runs" begin
+    # Not "the page parses": `index.md` parsed perfectly and raised `UndefVarError: Model` on the
+    # first line, because the example named a type the reader was supposed to have.
+    failures = String[]
+    for (page, i, b) in docs_blocks()
+        (_is_illustrative(b) || _is_transcript(b)) && continue
+        m = Module(Symbol("DocsBlock_", replace(page, "." => "_"), "_", i))
+        try
+            Core.eval(m, :(using ExperimentalAPI))
+            Core.eval(m, Meta.parseall(b; filename=page))
+        catch e
+            err = e isa LoadError ? e.error : e
+            push!(failures, "$page[$i]: " * first(sprint(showerror, err), 60))
+        end
+    end
+    @test failures == String[]
+end
+
+@testset "…and something is actually being run" begin
+    # Control: the loop above skips illustrative and transcript blocks, so it could quietly skip
+    # everything. At least the front page and one `declaring.md` block have to survive the filter.
+    runnable = [
+        (p, i) for (p, i, b) in docs_blocks() if !_is_illustrative(b) && !_is_transcript(b)
+    ]
+    @test length(runnable) >= 5
+    @test ("index.md", 1) in runnable
+end

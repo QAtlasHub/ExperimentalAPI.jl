@@ -14,7 +14,9 @@ a machine so the answer arrives without anyone remembering to ask for it.
 ```julia
 using ExperimentalAPI
 
-@experimental "convergence not established below β ≈ 0.1" energy(m::Model) = m.β * correction(m)
+@experimental "convergence not established below β ≈ 0.1" energy(β) = β * 1.0000001
+
+energy(0.5)
 ```
 
 ```console
