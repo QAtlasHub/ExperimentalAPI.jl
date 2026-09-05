@@ -94,10 +94,47 @@ end
 @testset "a script can be the entry point" begin
     # The shape a researcher has: a file that produces a figure, not a package. The file must be
     # written — `tempname()` alone throws regardless of the implementation.
-    path = tempname()
-    write(path, "1 + 1\n")
-    @test isfile(path)
-    @test hasproperty(ExperimentalAPI.reach_script(path), :reached)
+    #
+    # `hasproperty(…, :reached)` was the whole of this claim for a while, and it is satisfied by
+    # an implementation that returns an empty `Reach` for every input. So the script that reaches
+    # a mark and the one that does not are both run, and the verdicts have to differ.
+    dir = mktempdir()
+    plain = joinpath(dir, "plain.jl")
+    write(plain, "1 + 1\n")
+    @test isfile(plain)
+    r = ExperimentalAPI.reach_script(plain)
+    @test hasproperty(r, :reached)
+    @test ExperimentalAPI.verdict(r) === :clean
+
+    # A script in the shape it is actually written in: `using`, then work. The `using` line is
+    # evaluated in a scratch module — that is what `reach_script` costs, and it is why the
+    # analysis can resolve `Lifecycle.consumer` at all.
+    dirty = joinpath(dir, "figure.jl")
+    write(
+        dirty,
+        """
+        using Main: Lifecycle
+        const RESULT = Lifecycle.consumer(0.5)
+        RESULT
+        """,
+    )
+    d = ExperimentalAPI.reach_script(dirty)
+    @test ExperimentalAPI.verdict(d) === :depends
+    @test :verified_now in [x.mark.name for x in d.reached]
+    # …and the entry is named after the file, so a directory of scripts is readable.
+    @test :figure in [e.name for e in d.affected_entries] || Symbol("figure.jl") in [e.name for e in d.affected_entries]
+
+    # Control of the same shape: same `using`, same depth, nothing marked behind it.
+    settled_path = joinpath(dir, "settled.jl")
+    write(
+        settled_path,
+        """
+        using Main: Lifecycle
+        const RESULT = Lifecycle.settled(0.5)
+        RESULT
+        """,
+    )
+    @test ExperimentalAPI.verdict(ExperimentalAPI.reach_script(settled_path)) === :clean
 end
 
 # ── the exit: what licenses removing a mark ──────────────────────────────────────────────────

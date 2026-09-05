@@ -9,6 +9,12 @@
 # So this runs a real package through a real precompile, in a scratch depot, in a subprocess, and
 # asks the loaded module what it is carrying. Twice: once compiling from source, once reading the
 # cache the first run wrote. Only the second run is evidence.
+#
+# It asks about all three KINDS of mark, because they are stored differently: a whole-name
+# declaration, a mark attached to a definition (which also carries the `Type` it created), and a
+# mark on a method of `Base.show`, whose signature names a type defined in the cached package.
+# Only the first of those had ever been through a cache. It also runs `reach` across the package
+# boundary, which is the query that reads the other two.
 
 using Test: @test, @testset
 
@@ -31,6 +37,24 @@ println("UNACCOUNTED=", join(sort(string.(ExperimentalAPI.audit(MarkedPkg).unacc
 println("STABLE=", join(sort(string.(ExperimentalAPI.stable(MarkedPkg))), ","))
 println("CACHED=", Base.isprecompiled(Base.PkgId(MarkedPkg)))
 println("DEPOT1=", first(DEPOT_PATH))
+
+# The signature half. A `Mark` records the signature it attached to, and that field is a `Type`
+# living in a `const` vector inside the cache image — a different thing to serialise from a
+# `Symbol` and a `String`, and the reason this probe is not just about names.
+println("SIG=", ExperimentalAPI.mark(MarkedPkg, :unsettled).sig)
+println("METHODMARKS=", join(sort(string.(getfield.(ExperimentalAPI.experimental_methods(MarkedPkg), :name))), ","))
+println("SHOWSIG=", ExperimentalAPI.mark(MarkedPkg, :show).sig)
+println("SHOWMARKED=", ExperimentalAPI.isexperimental(which(show, Tuple{IO,MarkedPkg.Widget})))
+println("SHOWSIBLING=", ExperimentalAPI.isexperimental(which(show, Tuple{IO,Int})))
+println("BASESHOW=", ExperimentalAPI.isexperimental(Base, :show))
+
+# And the query that reads it: a caller in THIS process reaching a mark that was written while
+# another process precompiled another package. Nothing here names `unsettled`.
+caller(x) = MarkedPkg.consumer(x) + 1
+control(x) = MarkedPkg.settled(x) + 1
+println("REACH=", ExperimentalAPI.verdict(ExperimentalAPI.reach(caller, Tuple{Int})))
+println("REACHCONTROL=", ExperimentalAPI.verdict(ExperimentalAPI.reach(control, Tuple{Int})))
+println("REACHNAME=", join(sort(string.([r.mark.name for r in ExperimentalAPI.reach(caller, Tuple{Int}).reached])), ","))
 """
 
 function parse_probe(out)
@@ -94,14 +118,34 @@ end
         @test warm["CACHED"] == "true"
         @testset "$phase" for (phase, r) in
                               ("compiled from source" => cold, "from cache" => warm)
-            @test r["NAMES"] == "unsettled,unsettled_type"
+            @test r["NAMES"] == "show,unsettled,unsettled_type"
             @test r["REASON"] == "the return shape is still being decided"
             @test r["SINCE"] == "0.1.0"
             @test r["TRACKING"] == "https://example.invalid/issues/1"
-            # `settled` is documented and the other two are declared, so nothing is left over —
-            # the audit of a marked package agrees with the marks that survived.
+            # `settled`, `Widget` and `consumer` are documented and the rest are declared, so
+            # nothing is left over — the audit of a marked package agrees with the marks that
+            # survived.
             @test r["UNACCOUNTED"] == ""
-            @test r["STABLE"] == "settled"
+            @test r["STABLE"] == "Widget,consumer,settled"
+
+            # The signature came back, and it is the one the definition created rather than a
+            # widened stand-in.
+            @test r["SIG"] == "Tuple{typeof(MarkedPkg.unsettled), Any}"
+            @test r["METHODMARKS"] == "show,unsettled"
+            # The hard case: a mark on a method of somebody else's generic, whose signature names
+            # `typeof(Base.show)` and a type defined in the cached package.
+            @test r["SHOWSIG"] == "Tuple{typeof(show), IO, MarkedPkg.Widget}"
+            @test r["SHOWMARKED"] == "true"
+            # Controls, both of which would also be "true" for a mark that had widened to the
+            # whole generic on its way through the cache.
+            @test r["SHOWSIBLING"] == "false"
+            @test r["BASESHOW"] == "false"
+
+            # A caller that reaches a mark written during ANOTHER package's precompilation,
+            # without naming it — and a control of the same depth that reaches nothing marked.
+            @test r["REACH"] == "depends"
+            @test r["REACHNAME"] == "unsettled"
+            @test r["REACHCONTROL"] == "clean"
         end
         @test cold == warm
     end
