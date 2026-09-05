@@ -82,7 +82,10 @@ it had none:
   [`test_surface`](@ref) asserts on them. For a package whose surface *is* such methods —
   `fetch(model, quantity)` with 570 of them — a clean name audit reports nothing while having
   looked at none of them.
-- **Names public only inside an extension**, which is a separate module — audit it separately.
+- **Names public only inside an extension**, which is a separate module — audit it separately, or
+  avoid the blind spot the way this package does: declare the function and its docstring in the
+  parent (`function test_surface end` in `src/ExperimentalAPI.jl`) and let the extension add only
+  the method. The name is then on the parent's surface and `audit` sees it.
 - **Whether a name appears in your guide, README or documentation site.** Docstring presence and
   documentation-page presence are different sets, and this checks only the first. Documenter's
   `checkdocs = :public` and a `@autodocs` block cover part of the second.

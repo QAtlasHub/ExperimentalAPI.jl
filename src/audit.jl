@@ -397,7 +397,9 @@ generics of every loaded module. The name-level answer is unchanged by it.
     invisible here; `compare_methods` is the release-side answer.
   * **Prose quality.** A docstring exists or it does not; [`isdocumented`](@ref) reads no further.
   * **Names public only inside an extension**, which is a separate module — reported in
-    `extensions` and audited by passing it to `audit` in its own right.
+    `extensions` and audited by passing it to `audit` in its own right. Avoidable altogether:
+    declare the function and its docstring in the parent and let the extension add only the
+    method, which is what this package does for [`test_surface`](@ref).
 
 See [`test_surface`](@ref) to run this as a test, and [`snapshot`](@ref) to carry the result into
 a release decision.

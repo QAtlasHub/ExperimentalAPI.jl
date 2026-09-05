@@ -81,3 +81,23 @@ jobs:
       - run: julia --project=docs -e 'using Pkg; Pkg.instantiate(); include("docs/make.jl")'
         env:
           GKSwstype: nul
+
+  # The one context branch protection requires. Without it, protection has to name each matrix
+  # leg, and adding a Julia version leaves the new leg ungated while renaming one makes `main`
+  # permanently unmergeable.
+  #
+  # `if: always()` is load-bearing, and its absence is silent. Measured 2026-09-03 by failing a
+  # leg on purpose: with `needs:` alone this job is SKIPPED when a required leg fails, and GitHub
+  # counts a skipped required check as passing — so the gate would let a red pull request
+  # through, which is worse than the per-leg contexts it replaces. Measured with `always()`:
+  # a required leg failing gives `failure`, and a failing `nightly` still gives `success`,
+  # because `continue-on-error` keeps it out of `needs.test.result`.
+  all-tests:
+    name: All tests passed
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "needs.test.result = ${{ needs.test.result }}"
+          test "${{ needs.test.result }}" = "success"
