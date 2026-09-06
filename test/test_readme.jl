@@ -219,3 +219,48 @@ end
     # turning it back into an inert ```julia fence is caught here.
     @test occursin("```@example", read(joinpath(_DOCS, "index.md"), String))
 end
+
+# ── URLs inside examples ─────────────────────────────────────────────────────────────────────
+#
+# A placeholder URL must not look like a real address that fails. `github.com/org/Pkg.jl/issues/12`
+# resolved to GitHub and returned **404**, so a reviewer running a link checker saw a dead link —
+# which is the finding that opened the review of another package in this organisation.
+# `example.invalid` cannot resolve at all (RFC 2606 reserves it), which is what a placeholder
+# should look like. Checked without the network: the property is the host, not the response.
+
+const _RESERVED_HOSTS = ["example.com", "example.net", "example.org", "example.invalid"]
+const _OWN_HOSTS = ["github.com/QAtlasHub/", "qatlashub.github.io/"]
+
+"Every URL inside a fenced julia block, across the README and `docs/src`."
+function example_urls()
+    out = Tuple{String,String}[]
+    files = vcat([joinpath(@__DIR__, "..", "README.md")], sort(readdir(_DOCS; join=true)))
+    for f in files
+        endswith(f, ".md") || continue
+        for m in eachmatch(r"`{3,}julia\r?\n(.*?)`{3,}"s, read(f, String))
+            for u in eachmatch(r"https?://[^\s\"')]+", m.captures[1])
+                push!(out, (basename(f), u.match))
+            end
+        end
+    end
+    return out
+end
+
+@testset "a URL in an example is a reserved placeholder or a host we own" begin
+    urls = example_urls()
+    @test !isempty(urls)   # non-vacuity: the scan finds URLs at all
+    bad = [
+        "$f: $u" for (f, u) in urls if
+        !any(h -> occursin(h, u), _RESERVED_HOSTS) && !any(h -> occursin(h, u), _OWN_HOSTS)
+    ]
+    @test bad == String[]
+end
+
+@testset "…and the check can see one" begin
+    # Control: `github.com/org/…` is the shape that shipped, and it must not be accepted.
+    u = "https://github.com/org/Pkg.jl/issues/12"
+    @test !any(h -> occursin(h, u), _RESERVED_HOSTS)
+    @test !any(h -> occursin(h, u), _OWN_HOSTS)
+    # …while the replacement is.
+    @test any(h -> occursin(h, "https://example.invalid/issues/12"), _RESERVED_HOSTS)
+end

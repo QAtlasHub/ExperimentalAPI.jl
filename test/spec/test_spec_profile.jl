@@ -200,7 +200,10 @@ end
     # Long enough to be sampled: the timing backend is Julia's sampling profiler, and a run that
     # finishes inside one sampling interval has no fraction to report. Two million iterations of
     # a recorded body is tens of milliseconds — hundreds of samples, not a handful.
-    r = ExperimentalAPI.record(() -> Sim.driver(M, 2_000_000))
+    # `paths = false` because the two instruments cannot be read at once: `backtrace()` and the
+    # sampler both unwind the same threads' stacks, and asking for both is refused — see the
+    # measurement in `record`'s docstring, and the testset that pins the refusal below.
+    r = ExperimentalAPI.record(() -> Sim.driver(M, 2_000_000); paths=false, timing=true)
     @test r.sampled                                   # …the backend really was loaded
     f = ExperimentalAPI.experimental_fraction(r)
     @test 0.0 < f <= 1.0
@@ -208,7 +211,7 @@ end
 
 @testset "inclusive and exclusive time are distinguished" begin
     # Scope: a marked wrapper over settled code is not a marked kernel.
-    h = first(ExperimentalAPI.record(() -> Sim.driver(M, 1000)))
+    h = first(ExperimentalAPI.record(() -> Sim.driver(M, 1000); paths=false, timing=true))
     @test h.inclusive >= h.exclusive
     @test h.inclusive isa Float64
 end
@@ -309,6 +312,36 @@ end
     # mechanism. `Sim.energy` is one multiplication and is inlined into `inner`, which is inlined
     # into `driver`; the count still has to be exact. This is why the sampling route was rejected.
     @test ExperimentalAPI.record(() -> Sim.driver(M, 100))[1].count == 100
+end
+
+@testset "paths and time cannot be collected in one block" begin
+    # A conjunction, and each half was measured alone before the pair was refused. `backtrace()`
+    # unwinds the calling thread; the sampler unwinds the same threads from outside. 1.12.7, 150
+    # threaded records per run, four runs of each combination:
+    #
+    #     paths alone   0/4 crashed
+    #     timing alone  0/4
+    #     both          2/4   segmentation fault, no Julia backtrace
+    #
+    # So the pair is refused rather than risked, and the refusal names the measurement rather
+    # than saying "unsupported".
+    e = try
+        ExperimentalAPI.record(() -> Sim.driver(M, 1); paths=true, timing=true)
+        nothing
+    catch err
+        err
+    end
+    @test e isa ArgumentError
+    msg = sprint(showerror, e)
+    @test occursin("backtrace", msg)
+    @test occursin("2/4", msg)                       # the measurement, not just a prohibition
+    # Controls: each alone is accepted, which is what makes the refusal about the PAIR.
+    @test ExperimentalAPI.record(() -> Sim.driver(M, 1); paths=true, timing=false) isa
+        AbstractVector
+    @test ExperimentalAPI.record(() -> Sim.driver(M, 1); paths=false, timing=true) isa
+        AbstractVector
+    # …and the default is the one with no sampler, so an ordinary `record` never asks for both.
+    @test ExperimentalAPI.record(() -> Sim.driver(M, 1)).sampled === false
 end
 
 @testset "detection is on by default; counting is not" begin
@@ -464,11 +497,13 @@ end # module Hot
     Profile.@profile Hot.grind(2_000_000)
     before = Profile.len_data()
     @test before > 0
-    r = ExperimentalAPI.record(() -> Sim.driver(M, 10); with_profile=true)
+    r = ExperimentalAPI.record(
+        () -> Sim.driver(M, 10); paths=false, timing=true, with_profile=true
+    )
     @test r isa AbstractVector
     @test Profile.len_data() >= before
     # Control: without the keyword the buffer is cleared, so the keyword is doing the work.
-    ExperimentalAPI.record(() -> Sim.driver(M, 10))
+    ExperimentalAPI.record(() -> Sim.driver(M, 10); paths=false, timing=true)
     @test Profile.len_data() < before
     Profile.clear()
 end

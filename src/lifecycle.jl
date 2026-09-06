@@ -17,7 +17,7 @@ Not "is this marked" but "may this stop being marked", answered by the thing tha
 @experimental(
     "no reference value yet",
     since = v"0.1.0",
-    tracking = "https://github.com/org/Pkg.jl/issues/12",
+    tracking = "https://example.invalid/issues/12",
     until = () -> isfile(joinpath(@__DIR__, "..", "test", "refs", "energy.toml")),
     energy(β) = 2β,
 )
