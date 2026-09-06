@@ -170,8 +170,14 @@ not adopted this yet is in the second one. A report that could not tell them apa
 reassurance on a package where nothing had ever been declared.
 
 It is `record(() -> expr; paths = false, timing = false)` plus the report — the cheap question,
-`which` and `how often`. For call paths, time, or the [`Record`](@ref) as data, call
-[`record`](@ref).
+`which` and `how often`, needing neither a backtrace nor a sampler. For call paths, time (never
+both — see [`record`](@ref)), or the [`Record`](@ref) as data, call [`record`](@ref).
+
+The route is deliberately not printed: a captured path is a list of frame names, and Base's
+higher-order functions are in it. `sum(f, xs)` over a generator reports `driver → sum → mapreduce
+→ mapfoldl → mapfoldl_impl → foldl_impl → _foldl_impl → MappingRF → inner → energy` — three names
+the reader wrote and seven they did not. Separating the two needs `paths` to carry which module
+each frame came from, which is a change to what [`Hit`](@ref)`.paths` means.
 
 ### How it counts without a counter in the body
 
