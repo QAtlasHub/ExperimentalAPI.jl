@@ -160,7 +160,7 @@ const _DEPTH = Ref(0)
 const _RECORD_LOCK = ReentrantLock()
 
 """
-    record(f; paths = true, timing = true, with_profile = false, rethrow = true, maxdepth) -> Record
+    record(f; paths = true, timing = false, with_profile = false, rethrow = true) -> Record
 
 Run `f` and report which marked definitions it entered, how often, and by which paths.
 
@@ -176,8 +176,8 @@ says what happened, and enumerating what did not is [`experimental`](@ref)'s job
 
 | keyword | |
 |---|---|
-| `paths` | capture call paths. Bounded — see [`Hit`](@ref) — but still the expensive part |
-| `timing` | ask the [`TimingBackend`](@ref) for `inclusive`/`exclusive`. Ignored if none is loaded |
+| `paths` | capture call paths. Bounded — see [`Hit`](@ref) — and **on by default** |
+| `timing` | ask the [`TimingBackend`](@ref) for `inclusive`/`exclusive`. Off by default, and **cannot be combined with `paths`** |
 | `with_profile` | leave whatever is already in the profile buffer alone instead of clearing it |
 | `rethrow` | `false` returns the record for the part of `f` that ran instead of propagating |
 
@@ -190,10 +190,28 @@ count.
     Every marked body takes its write path while a recording is open. The record reports the
     recorder's estimated share of the elapsed time in `overhead`; [`overhead_when_detecting`](@ref)
     is the other number, and it is 3%.
+
+!!! warning "Paths and time are two instruments, and they cannot be read at once"
+    Capturing a call path calls `backtrace()`; the timing backend's sampler walks the same
+    threads' stacks from outside, and two unwinders on one stack is a segmentation fault rather
+    than a wrong number. Measured on 1.12.7 with 150 threaded records per run, four runs of each
+    combination: paths alone **0/4** crashed, timing alone **0/4**, both **2/4**. Asking for both
+    is refused rather than risked, and the default is `paths` — the instrument that needs no
+    sampler and has no global side effect.
 """
 function record(
-    f; paths::Bool=true, timing::Bool=true, with_profile::Bool=false, rethrow::Bool=true
+    f; paths::Bool=true, timing::Bool=false, with_profile::Bool=false, rethrow::Bool=true
 )
+    (paths && timing) && throw(
+        ArgumentError(
+            "record: `paths` and `timing` cannot both be collected in one block. Capturing a " *
+            "call path calls `backtrace()`, and the timing backend's sampler walks the same " *
+            "threads' stacks from outside — measured on 1.12.7, four runs of each combination: " *
+            "paths alone 0/4 crashed, timing alone 0/4, both 2/4 with a segmentation fault and " *
+            "no Julia backtrace. Ask for one: `record(f)` for counts and paths, " *
+            "`record(f; paths = false, timing = true)` for counts and time.",
+        ),
+    )
     ps = probes()
     slots = Threads.maxthreadid()
     sampled = false
