@@ -35,10 +35,19 @@ not tell them apart would be worth nothing on a package that has no marks yet.
 
 # What it is, exactly
 
-`record(() -> expr; paths = false, timing = false)`, plus the report. The two defaults are the
-specialisation: this asks *which* and *how often*, which is the cheap question. Call
-[`record`](@ref) directly for call paths, for `inclusive`/`exclusive` time, and for the
-[`Record`](@ref) as data — this returns the value of `expr`, not the record.
+`record(() -> expr; paths = false, timing = false)`, plus the report. It asks *which* and *how
+often* — the cheap question, and the one that needs neither a backtrace nor a sampler. Call
+[`record`](@ref) directly for call paths, for `inclusive`/`exclusive` time (never both — see the
+measurement in its docstring), and for the [`Record`](@ref) as data. This returns the value of
+`expr`, not the record.
+
+!!! note "Why the route is not printed"
+    A call path is captured as a list of frame names, and Base's higher-order functions are in it:
+    `sum(f, xs)` over a generator reports `driver → sum → mapreduce → mapfoldl → mapfoldl_impl →
+    foldl_impl → _foldl_impl → MappingRF → inner → energy`. The three names the reader wrote are
+    in there, and so are seven they did not. Printing that would be worse than printing nothing,
+    and separating the two needs `paths` to carry which module each frame came from — a change to
+    what [`Hit`](@ref)`.paths` means, not a change to this macro.
 
 !!! note "If `expr` throws"
     The exception propagates and nothing is printed. `record(f; rethrow = false)` is the form
