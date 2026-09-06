@@ -81,7 +81,7 @@ public Probe, Entry, entered, marked_modules, probes, detecting, summary_text
 public overhead_when_detecting
 public Hit, Record, Attribution, TimingBackend, timing_backend
 public record, recording, merge_records, attribute, experimental_fraction
-public write_record, read_record, assert_clean
+public write_record, read_record, assert_clean, @entered
 
 # Analysing — what code could reach
 public Reach,
@@ -114,6 +114,7 @@ include("query.jl")      # reading a module's marks back out, by name and by met
 include("audit.jl")      # the public surface, and the names and methods neither account covers
 include("reach.jl")      # what a caller depends on without naming it
 include("record.jl")     # the opt-in layer: counts, call paths, and how much of the run
+include("macros.jl")     # the expression-level spelling of the observing layer
 include("verify.jl")     # how well the tests exercise what is marked
 include("lifecycle.jl")  # the mark's exit
 include("docsnote.jl")   # the mark, in the rendered documentation

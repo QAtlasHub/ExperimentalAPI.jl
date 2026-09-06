@@ -9,6 +9,7 @@ using Test
     include("test_audit.jl")
     include("test_release.jl")
     include("test_ext.jl")
+    include("test_macros.jl")
     include("test_precompile.jl")
     include("test_dogfood.jl")
     # The case matrix. Written before the implementation, so most of it is @test_broken;
