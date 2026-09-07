@@ -215,11 +215,13 @@ function record(
     ps = probes()
     slots = Threads.maxthreadid()
     sampled = false
-    saved = Bool[]
+    # Keyed by probe rather than by position: the set is re-derived after the block, and a
+    # positional `saved` cannot be lined up against a set that grew.
+    saved = Dict{Probe,Bool}()
     @lock _RECORD_LOCK begin
         if _DEPTH[] == 0
-            saved = Bool[p.entered for p in ps]
             for p in ps
+                saved[p] = p.entered
                 _arm!(p, slots)
                 p.entered = false
             end
@@ -236,36 +238,67 @@ function record(
     if timing && outermost
         sampled = start_timing!(timing_backend(); clear=(!with_profile))
     end
+
+    counts = Dict{Probe,Int}()
+    measured = Probe[]
+    closed = Ref(false)
+    # Closing is a closure because it has to run on two paths, and on the failing one it has to
+    # run INSIDE the `catch` — see the call site.
+    function close!()
+        closed[] && return nothing
+        closed[] = true
+        sampled && stop_timing!(timing_backend())
+        # The probe set is re-derived here rather than reused from before the call. A mark can
+        # come into existence WHILE the block runs — a package extension loaded by `f` is the
+        # ordinary way — and a probe that was not in the snapshot is entered by code that ran,
+        # counted by nobody, and left with its flag `false` for the rest of the process. That
+        # loses the entry from `entered()` and from the exit summary too, which is the one thing
+        # the default layer promises never to do.
+        #
+        # `invokelatest`, because reading those probes is the whole point and their bindings are
+        # younger than this frame: `probes()` reaches `M.__EXPERIMENTAL_API_ENTERED_newborn__`,
+        # created while `f` ran. Julia 1.12 warns that reading a binding in a world prior to its
+        # definition world will be an error.
+        append!(measured, Base.invokelatest(probes))
+        for p in measured
+            counts[p] = _probe_count(p) - get(before, p, 0)
+        end
+        @lock _RECORD_LOCK begin
+            _DEPTH[] -= 1
+            if _DEPTH[] == 0
+                _RECORDING[] = false
+                _CAPTURE_PATHS[] = true
+                for p in measured
+                    p.entered = get(saved, p, false) || counts[p] > 0
+                end
+            end
+        end
+        return nothing
+    end
+
     t0 = time()
     err = nothing
     try
         f()
     catch e
         err = e
-    end
-    elapsed = time() - t0
-    sampled && stop_timing!(timing_backend())
-    times = sampled ? attribute_timing(timing_backend()) : nothing
-
-    counts = Dict{Probe,Int}(p => _probe_count(p) - get(before, p, 0) for p in ps)
-    traces = Dict{Probe,Vector{Vector{Symbol}}}(p => _paths_of(p) for p in ps)
-    @lock _RECORD_LOCK begin
-        _DEPTH[] -= 1
-        if _DEPTH[] == 0
-            _RECORDING[] = false
-            _CAPTURE_PATHS[] = true
-            for (i, p) in enumerate(ps)
-                p.entered = (i <= length(saved) && saved[i]) || counts[p] > 0
-            end
+        if rethrow
+            # Closed here, and re-raised from inside the `catch`, because that is the only place
+            # the exception's own backtrace survives. Closing first and calling `throw(err)`
+            # afterwards — which is what this did — manufactures a fresh backtrace rooted in this
+            # function, so the caller debugging a failed run sees `record.jl` where their own call
+            # chain should be.
+            close!()
+            Base.rethrow()
         end
     end
-    # `Base.rethrow(err)` is legal only inside a `catch`; here it raises
-    # "rethrow(exc) not allowed outside a catch block" and the caller never sees their own
-    # exception. `throw` gives a fresh backtrace, which is the price of building the record first.
-    err === nothing || rethrow && throw(err)
+    elapsed = time() - t0
+    close!()
+    times = sampled ? attribute_timing(timing_backend()) : nothing
+    traces = Dict{Probe,Vector{Vector{Symbol}}}(p => _paths_of(p) for p in measured)
 
     hits = Hit[]
-    for p in ps
+    for p in measured
         n = counts[p]
         n > 0 || continue
         mk = mark(p.mod, p.name)

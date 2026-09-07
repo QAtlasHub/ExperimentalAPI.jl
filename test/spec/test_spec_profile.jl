@@ -370,6 +370,68 @@ end
     @test 0.0 <= r.overhead <= 1.0
 end
 
+@testset "a mark born while the block runs is measured, not lost" begin
+    # The probe set was snapshotted BEFORE the call and never re-derived, so a mark that came
+    # into existence while `f` ran was entered by code that ran, counted by nobody, and left with
+    # its flag `false` for the rest of the process. That loses the entry from the OPT-IN layer and
+    # from the always-on one — `entered()` and the exit summary — which is the one thing the
+    # default layer promises never to do.
+    #
+    # A package extension loaded inside the block is the ordinary way this happens, and this
+    # package ships three of them; `Core.eval` is the same event without the loading machinery.
+    @eval module Newborn
+    using ExperimentalAPI
+    public settled_mark
+    @experimental "present before the block" settled_mark(x) = x + 1
+    end
+    r = ExperimentalAPI.record() do
+        Base.invokelatest(Main.Newborn.settled_mark, 1)
+        Core.eval(Main.Newborn, :(@experimental "born mid-call" newborn(x) = x * 2))
+        Base.invokelatest(Base.invokelatest(getglobal, Main.Newborn, :newborn), 2)
+    end
+    @test :newborn in [h.name for h in r]
+    @test :settled_mark in [h.name for h in r]
+    # The always-on layer, which never asked to be turned on and cannot be turned off.
+    entered = [e.name for e in ExperimentalAPI.entered(Main.Newborn)]
+    @test :newborn in entered
+    @test :settled_mark in entered
+    # Control: a mark defined but never called is still absent, so the fix did not simply start
+    # reporting everything it can see.
+    Core.eval(Main.Newborn, :(@experimental "born and never called" stillborn(x) = x))
+    @test :stillborn ∉ [h.name for h in r]
+    @test :stillborn ∉ [e.name for e in ExperimentalAPI.entered(Main.Newborn)]
+end
+
+@testset "an exception keeps the backtrace that points at the caller's own code" begin
+    # `record` caught the exception, did its bookkeeping, then re-raised with `throw(err)` — which
+    # outside a `catch` manufactures a FRESH backtrace rooted in `record`. The caller debugging a
+    # failed run saw `record.jl` and macro expansion where their own call chain should be, with
+    # nothing to say frames had been dropped.
+    @eval module Boom
+    using ExperimentalAPI
+    public energy
+    @experimental "why" energy(x) = x < 0 ? error("boom") : x
+    end
+    deep(x) = Main.Boom.energy(x)
+    mid(x) = deep(x)
+    outer(x) = mid(x)
+    frames(f) =
+        try
+            f()
+            String[]
+        catch
+            [string(fr.func) for fr in stacktrace(catch_backtrace())]
+        end
+
+    own = ["outer", "mid", "deep", "energy"]
+    direct = frames(() -> outer(-3))
+    @test all(n -> n in direct, own)                       # the fixture can disagree
+    viarecord = frames(() -> ExperimentalAPI.record(() -> outer(-3)))
+    @test all(n -> n in viarecord, own)
+    # …and the exception itself is still the caller's, not a wrapper.
+    @test_throws ErrorException ExperimentalAPI.record(() -> outer(-3))
+end
+
 @testset "recording nests without double counting" begin
     @test ExperimentalAPI.record(() -> ExperimentalAPI.record(() -> Sim.driver(M, 10)))[1].count ==
         10
