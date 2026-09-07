@@ -67,6 +67,7 @@ What [`record`](@ref) observed: a `Vector`-like of [`Hit`](@ref), plus what the 
 | `overhead` | the recorder's estimated share of `elapsed` |
 | `versions` | package versions the marks were read against |
 | `sampled` | whether a timing backend produced `inclusive`/`exclusive` |
+| `value` | what `f` returned, so measuring a call does not mean losing its result |
 
 Indexing, iteration and `==` are the `Hit` vector's, so `record(f) == []` reads the way it looks.
 The extra properties are why it is a type and not a plain vector: an empty `Vector{Hit}` cannot
@@ -80,6 +81,7 @@ struct Record <: AbstractVector{Hit}
     overhead::Float64
     versions::Dict{String,Any}
     sampled::Bool
+    value::Any
 end
 
 Base.size(r::Record) = size(r.hits)
@@ -278,8 +280,9 @@ function record(
 
     t0 = time()
     err = nothing
+    value = nothing
     try
-        f()
+        value = f()
     catch e
         err = e
         if rethrow
@@ -330,6 +333,7 @@ function record(
         _estimate_overhead(total, elapsed),
         _versions_of(hits),
         sampled,
+        value,
     )
 end
 
@@ -456,6 +460,9 @@ function merge_records(rs)
         _estimate_overhead(total, elapsed),
         versions,
         any(r -> r.sampled, rs),
+        # Several runs have no one value between them, and picking one would be a guess about
+        # which run the caller meant.
+        nothing,
     )
 end
 
@@ -591,9 +598,9 @@ end
 
 Read back a record written by [`write_record`](@ref).
 
-The `method` field of every [`Hit`](@ref) comes back `nothing`: a `Method` is not a thing a file
-can carry, and reconstructing one would mean claiming the code in this process is the code that
-produced the record.
+The `method` field of every [`Hit`](@ref) comes back `nothing`, and so does the record's `value`:
+neither a `Method` nor a run's result is a thing a file can carry, and reconstructing one would
+mean claiming the code in this process is the code that produced the record.
 """
 function read_record(path::AbstractString)
     d = TOML.parsefile(path)
@@ -625,6 +632,9 @@ function read_record(path::AbstractString)
         Float64(get(d, "overhead", 0.0)),
         Dict{String,Any}(get(d, "versions", Dict{String,Any}())),
         get(d, "sampled", false),
+        # A run's result is not something a TOML file can carry, and reconstructing one would be
+        # claiming this process re-ran what that file describes.
+        nothing,
     )
 end
 
