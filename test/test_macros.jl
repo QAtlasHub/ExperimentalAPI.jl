@@ -111,7 +111,9 @@ end
     # This line is the reason the report exists, and nothing asserted it: deleting the whole
     # footer left the suite green.
     _, out = grab(() -> ExperimentalAPI.@entered MacroFixture.driver(0.5, 2))
-    m = match(r"└ (\d+) of (\d+) observable marked definitions? (?:was|were) not entered", out)
+    m = match(
+        r"└ (\d+) of (\d+) observable marked definitions? (?:was|were) not entered", out
+    )
     @test m !== nothing
     rest, total = parse(Int, m[1]), parse(Int, m[2])
     @test total == length(ExperimentalAPI.probes())
@@ -140,7 +142,10 @@ end
     @test occursin("begin", blockheader)
     @test !occursin("\n", blockheader)            # collapsed onto one line
     # …and a nested macro call does not leak its `#= file:line =#` into the label.
-    _, nested = grab(() -> ExperimentalAPI.@entered (ExperimentalAPI.@entered MacroFixture.driver(0.5, 1)))
+    _, nested = grab(
+        () ->
+            ExperimentalAPI.@entered (ExperimentalAPI.@entered MacroFixture.driver(0.5, 1))
+    )
     @test !occursin("#=", nested)
 end
 

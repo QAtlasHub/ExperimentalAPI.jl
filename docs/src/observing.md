@@ -150,8 +150,8 @@ closure cannot — the source text of the call and the line it is written on:
 ```julia
 julia> ExperimentalAPI.@entered sweep(model; βs = 0.05:0.05:2.0)
 ┌ @entered sweep(model; βs = 0.05:0.05:2.0)   at sweep.jl:42
-│   MyPkg.energy       ×10000 — convergence not established below β ≈ 0.1
-│   MyPkg.correlator   ×  500 — edge cases at zero separation untested
+│   MyPkg.correlator  ×  500 — edge cases at zero separation untested
+│   MyPkg.energy      ×10000 — convergence not established below β ≈ 0.1
 └ 15 of 17 observable marked definitions were not entered
 0.42713…
 ```
@@ -169,15 +169,19 @@ julia> ExperimentalAPI.@entered publish(result)
 not adopted this yet is in the second one. A report that could not tell them apart would read as
 reassurance on a package where nothing had ever been declared.
 
-It is `record(() -> expr; paths = false, timing = false)` plus the report — the cheap question,
+It returns the record's `value`, which is what `record` now carries out of the block, so measuring
+a call does not cost its result. It is `record(() -> expr; paths = false, timing = false)` plus
+the report — the cheap question,
 `which` and `how often`, needing neither a backtrace nor a sampler. For call paths, time (never
 both — see [`record`](@ref)), or the [`Record`](@ref) as data, call [`record`](@ref).
 
 The route is deliberately not printed: a captured path is a list of frame names, and Base's
-higher-order functions are in it. `sum(f, xs)` over a generator reports `driver → sum → mapreduce
-→ mapfoldl → mapfoldl_impl → foldl_impl → _foldl_impl → MappingRF → inner → energy` — three names
-the reader wrote and seven they did not. Separating the two needs `paths` to carry which module
-each frame came from, which is a change to what [`Hit`](@ref)`.paths` means.
+higher-order functions are in it. Measured for `driver(x, n) = sum(inner(x) for _ in 1:n)`, the
+captured path runs `driver → sum → #sum#278 → sum → #sum#277 → mapreduce → #mapreduce#274 →
+mapfoldl → #mapfoldl#270 → mapfoldl_impl → foldl_impl → _foldl_impl → MappingRF → #driver##0 →
+inner → energy` — three names the reader wrote and thirteen they did not. Separating the two needs
+`paths` to carry which module each frame came from, which is a change to what
+[`Hit`](@ref)`.paths` means.
 
 ### How it counts without a counter in the body
 

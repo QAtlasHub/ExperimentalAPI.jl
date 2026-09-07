@@ -115,7 +115,13 @@ function _report_entered(io::IO, rec::Record, ex, src::LineNumberNode)
     countwidth = maximum(length, counts)
     for (h, label, count) in zip(rec, labels, counts)
         println(
-            io, "│   ", rpad(label, namewidth), "  ×", lpad(count, countwidth), " — ", h.reason
+            io,
+            "│   ",
+            rpad(label, namewidth),
+            "  ×",
+            lpad(count, countwidth),
+            " — ",
+            h.reason,
         )
     end
     rest = max(0, total - length(rec))
