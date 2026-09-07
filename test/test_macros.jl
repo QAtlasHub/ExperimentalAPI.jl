@@ -79,11 +79,84 @@ end
     # state every package is in before it adopts this.
     _, out = grab(() -> ExperimentalAPI.@entered sum(1:10))
     @test occursin("entered nothing marked", out)
-    @test occursin(r"\d+ observable marked definitions were loaded", out)
+    # The NUMBER, not `\d+` — which any digits satisfy, including a hardcoded one.
+    @test occursin("$(length(ExperimentalAPI.probes())) observable marked definitions", out)
     # Control: the two answers really are different text, so a report that always printed one of
     # them could not pass both this and the testset above.
     _, dirty = grab(() -> ExperimentalAPI.@entered MacroFixture.driver(0.5, 2))
     @test !occursin("entered nothing marked", dirty)
+end
+
+@testset "several marks in one call are all listed, and the columns line up" begin
+    # Every other test drives `driver`, which enters `energy` alone — so the loop over the hits
+    # and the width computation ran with exactly one row and `for h in rec[1:1]` would have been
+    # invisible.
+    _, out = grab() do
+        ExperimentalAPI.@entered begin
+            MacroFixture.driver(0.5, 3)
+            MacroFixture.correlator(0.5, 2)
+        end
+    end
+    @test occursin("MacroFixture.energy", out)
+    @test occursin("MacroFixture.correlator", out)
+    rows = [l for l in split(out, "\n") if startswith(l, "│")]
+    @test length(rows) == 2
+    # Sorted by name, so the order does not move with the measurement and two runs can be diffed.
+    @test occursin("correlator", rows[1]) && occursin("energy", rows[2])
+    # One column: the `×` starts at the same offset on every row.
+    @test allequal(findfirst("×", r).start for r in rows)
+end
+
+@testset "the footer counts what was NOT entered, and the arithmetic holds" begin
+    # This line is the reason the report exists, and nothing asserted it: deleting the whole
+    # footer left the suite green.
+    _, out = grab(() -> ExperimentalAPI.@entered MacroFixture.driver(0.5, 2))
+    m = match(r"└ (\d+) of (\d+) observable marked definitions? (?:was|were) not entered", out)
+    @test m !== nothing
+    rest, total = parse(Int, m[1]), parse(Int, m[2])
+    @test total == length(ExperimentalAPI.probes())
+    @test rest == total - 1                       # exactly one mark was entered
+    @test occursin(rest == 1 ? " was not entered" : " were not entered", out)
+end
+
+@testset "the header is a label: long expressions are cut, blocks are one line" begin
+    # Both branches of `_short_expr` past the happy path, neither of which any test reached.
+    _, long = grab() do
+        ExperimentalAPI.@entered MacroFixture.driver(
+            0.5 + 0.0 + 0.0 + 0.0 + 0.0 + 0.0 + 0.0 + 0.0 + 0.0 + 0.0 + 0.0, 2
+        )
+    end
+    header = first(split(long, "\n"))
+    @test occursin("...", header)
+    @test length(header) < 100                    # cut, not merely long
+
+    _, block = grab() do
+        ExperimentalAPI.@entered begin
+            MacroFixture.driver(0.5, 1)
+            MacroFixture.driver(0.5, 1)
+        end
+    end
+    blockheader = first(split(block, "\n"))
+    @test occursin("begin", blockheader)
+    @test !occursin("\n", blockheader)            # collapsed onto one line
+    # …and a nested macro call does not leak its `#= file:line =#` into the label.
+    _, nested = grab(() -> ExperimentalAPI.@entered (ExperimentalAPI.@entered MacroFixture.driver(0.5, 1)))
+    @test !occursin("#=", nested)
+end
+
+@testset "the value comes back from the record, and `return` inside it does not" begin
+    # `record` now carries `f`'s result, so measuring a call no longer costs its value — and the
+    # macro reads it from there rather than out of a box that an early `return` leaves undefined.
+    r = ExperimentalAPI.record(() -> MacroFixture.driver(0.5, 2))
+    @test r.value ≈ MacroFixture.driver(0.5, 2)
+
+    # The one place the `@time` comparison breaks, pinned so it cannot break further: `record`
+    # takes a function, so `return` exits the expression rather than the enclosing method. It used
+    # to leave the value unreachable and raise `UndefRefError`; now it is the macro's value.
+    early(x) = (ExperimentalAPI.@entered (x > 5 && return :early); :normal)
+    @test grab(() -> early(10))[1] === :normal
+    kept(x) = ExperimentalAPI.@entered (x > 5 ? :early : MacroFixture.driver(0.5, 1))
+    @test grab(() -> kept(10))[1] === :early
 end
 
 @testset "the report names the call and the line it was written on" begin
