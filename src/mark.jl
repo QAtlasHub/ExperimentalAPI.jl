@@ -259,9 +259,10 @@ The difference shows up in three places: [`reach`](@ref) only reports the marked
 # What gets observed
 
 A definition **with a body** — `function` and short-form `f(x) = …`, including parametric,
-callable-object and return-type-annotated signatures — also gets a flag in that body, so
-[`entered`](@ref) can report whether the run went through it. The flag is one short-circuit read:
-`1.03x` on one thread and `0.985x` on eight, measured over 10M calls of a numeric body.
+callable-object and return-type-annotated signatures, and those wrapped in an annotating macro
+such as `@inline` — also gets a flag in that body, so [`entered`](@ref) can report whether the run
+went through it. The flag is one short-circuit read: `1.03x` on one thread and `0.985x` on eight,
+measured over 10M calls of a numeric body.
 
 Every other form is a **declaration only** — recorded, queryable and audited, but not observed:
 
@@ -272,8 +273,9 @@ Every other form is a **declaration only** — recorded, queryable and audited, 
 | a name list (`@experimental "…" a b c`) | no — those definitions are elsewhere and already compiled |
 | `struct`, `abstract type`, `primitive type`, `const`, assignment | no — nothing is *entered* |
 | `macro` | no |
+| `@inline`, `@noinline`, `@propagate_inbounds`, `@assume_effects`, `@constprop`, `@nospecializeinfer` | yes — they annotate a definition and leave its body alone, so the flag rides inside |
 | `@generated function` | no — the body returns an expression, so a probe there would be generated rather than run |
-| `Base.@kwdef`, `@inline`, `@noinline` and the other pass-through macros | no |
+| `Base.@kwdef` | no — it wraps a `struct`, which has no body |
 
 One flag per marked **name**, not per method: flags are name-keyed, so two methods of a marked
 name share one.

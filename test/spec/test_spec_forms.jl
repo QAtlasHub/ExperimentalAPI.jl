@@ -159,14 +159,51 @@ end
 end
 
 @testset "@inline and the mark compose in both orders" begin
-    @test begin
-        @eval module InlineMarked
-        using ExperimentalAPI
-        @experimental "kernel unverified" @inline f(x) = x
-        @inline @experimental "kernel unverified" g(x) = x
-        end
-        Set([mk.name for mk in experimental(Main.InlineMarked)]) == Set([:f, :g])
+    # "Compose" was asserted as `Set([:f, :g])` — the names are marked — and that is satisfied by
+    # a mark that can never fire. Measured: the two orders did NOT compose the same way. With the
+    # mark outside, `_instrument` saw a `:macrocall` and returned `nothing`, so the flag was
+    # registered and nothing ever set it; with the mark inside, the flag worked. `entered` said
+    # `[:g]` after calling both. An `@inline` kernel is exactly what this package is for, so the
+    # claim has to be about the observation, not about the name.
+    @eval module InlineMarked
+    using ExperimentalAPI
+    @experimental "kernel unverified" @inline f(x) = x
+    @inline @experimental "kernel unverified" g(x) = x
     end
+    @test Set([mk.name for mk in experimental(Main.InlineMarked)]) == Set([:f, :g])
+    @test Set(p.name for p in ExperimentalAPI.probes(Main.InlineMarked)) == Set([:f, :g])
+    Main.InlineMarked.f(1)
+    Main.InlineMarked.g(1)
+    @test Set(e.name for e in ExperimentalAPI.entered(Main.InlineMarked)) == Set([:f, :g])
+end
+
+@testset "every annotating macro carries the flag, and the opaque ones still do not" begin
+    # The control the testset above cannot be on its own: a fix that instrumented EVERY macrocall
+    # would satisfy it while putting a probe inside `@generated`'s returned expression, where it
+    # is generated rather than run. The split between the two lists is the claim.
+    @eval module Annotated
+    using ExperimentalAPI
+    @experimental "a" @inline a(x) = x
+    @experimental "b" @noinline b(x) = x
+    @experimental "c" Base.@propagate_inbounds c(x) = x
+    @experimental "d" Base.@assume_effects :terminates_locally d(x) = x
+    @experimental "e" @generated e(x) = :(x)
+    @experimental "f" Base.@kwdef struct Opaque
+        n::Int = 1
+    end
+    end
+    for n in (:a, :b, :c, :d)
+        Core.eval(Main.Annotated, :($n(1)))
+    end
+    Main.Annotated.e(1)
+    Main.Annotated.Opaque()
+    @test Set(e.name for e in ExperimentalAPI.entered(Main.Annotated)) ==
+        Set([:a, :b, :c, :d])
+    # …and the two that are not observed are still marked, queryable and audited.
+    @test Set(mk.name for mk in experimental(Main.Annotated)) ==
+        Set([:a, :b, :c, :d, :e, :Opaque])
+    @test Set(p.name for p in ExperimentalAPI.probes(Main.Annotated)) ==
+        Set([:a, :b, :c, :d])
 end
 
 @testset "a definition produced by @eval can be marked by name" begin
@@ -257,6 +294,86 @@ end
     msg = sprint(showerror, e isa LoadError ? e.error : e)
     @test occursin("unsupported `const` declaration", msg)
     @test !occursin("mark.jl", msg)
+end
+
+# Each of these three is refused today, and none of the messages was pinned by anything — measured
+# 2026-09-08 by grepping `test/` for their text and finding zero hits. A refusal is half of what
+# this macro does: the other half of "cannot guess which name this defines" is saying what to
+# write instead, and a message can rot into a bare failure without a single test going red.
+@testset "a wrapping macro this cannot read is refused by name, and points at the name list" begin
+    for (label, body) in (
+        "another @experimental" => """@experimental "outer" @experimental "inner" f(x) = x""",
+        "an unknown macro" => """@experimental "why" @assert true""",
+    )
+        @testset "$label" begin
+            e = try
+                include_string(
+                    Main,
+                    "module Wrap_$(hash(label))\nusing ExperimentalAPI\n$body\nend",
+                    "wrap.jl",
+                )
+                nothing
+            catch err
+                err
+            end
+            # Unwrapped in a loop, not once: a macro that throws while expanding a `module` body
+            # passed through `include_string` comes back wrapped TWICE, and a single `.error`
+            # leaves a `LoadError` that reads exactly like the failure it is hiding.
+            while e isa LoadError
+                e = e.error
+            end
+            @test e isa ArgumentError
+            msg = sprint(showerror, e)
+            # Names the macro it could not read, so the author knows which line to change…
+            @test occursin("@", msg)
+            # …and the form that always works, which is what makes it actionable.
+            @test occursin("@experimental \"why\" the_name", msg)
+        end
+    end
+end
+
+@testset "a block of definitions is refused rather than half-marked" begin
+    # The dangerous silence: `begin f(x)=x; g(x)=x end` has two names and the macro can only
+    # record one. Marking the first and dropping the second would be a covenant that omits a
+    # definition without saying so.
+    e = try
+        @eval module BlockSubject
+        using ExperimentalAPI
+        @experimental "why" begin
+            f(x) = x
+            g(x) = x
+        end
+        end
+        nothing
+    catch err
+        err isa LoadError ? err.error : err
+    end
+    @test e isa ArgumentError
+    msg = sprint(showerror, e)
+    @test occursin("block", msg)
+    @test occursin("the_name", msg)
+end
+
+@testset "a bare qualified name is refused, because the module it names is not ours to mark" begin
+    # `@experimental "why" Sub.g` reads as marking somebody else's `g`. The name list records into
+    # the module the macro ran in, so accepting it would file the mark in the wrong registry.
+    e = try
+        @eval module QualifiedBare
+        using ExperimentalAPI
+        module Sub
+            g(x) = x
+        end
+        @experimental "why" Sub.g
+        end
+        nothing
+    catch err
+        err isa LoadError ? err.error : err
+    end
+    @test e isa ArgumentError
+    msg = sprint(showerror, e)
+    @test occursin("Sub.g", msg)        # the expression the author wrote, not a generic complaint
+    @test occursin("WHICH method", msg)  # why a bare qualified name is not enough…
+    @test occursin("Sub.g(::", msg)      # …and the form that is, spelled out with their own name
 end
 
 # ── metadata ─────────────────────────────────────────────────────────────────────────────────

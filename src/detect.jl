@@ -207,6 +207,20 @@ _probe(flag) = :($flag[] || ($flag[] = true))
 # marked definition. `record`'s call paths are built out of exactly that.
 function _instrument(def, flag, src::LineNumberNode)
     def isa Expr || return nothing
+    if def.head === :macrocall
+        # An annotating macro — `@inline` and its neighbours — leaves the body alone, so the probe
+        # rides inside the definition it wraps and the wrapper is rebuilt around the result. Only
+        # those reach here: `_subject` marks a macrocall instrumentable exactly when the macro is
+        # in `_ANNOTATING_MACROS`, and refuses or opts out of every other one.
+        #
+        # Returning `nothing` here instead — which is what this did — did not merely lose the
+        # observation. The flag is registered either way, so `@experimental "…" @inline f(x) = x`
+        # counted as an observable definition that no call could ever set: `entered` reported it
+        # as not entered no matter what ran, and `unverified` reported it forever.
+        inner = _instrument(def.args[end], flag, src)
+        inner === nothing && return nothing
+        return Expr(:macrocall, def.args[1:(end - 1)]..., inner)
+    end
     (def.head === :function || def.head === :(=)) || return nothing
     _is_signature(def.args[1]) || return nothing
     length(def.args) == 2 || return nothing
