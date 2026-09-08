@@ -17,6 +17,13 @@
 # call site with no unique method, and a function passed as a value is specialised on `typeof(f)`
 # and resolves.
 
+@experimental """
+the line between `:clean` and `:unknown` is drawn by Julia's own IR accessors, which are internal \
+and differ by minor version: a statement's line comes from `Base.IRShow.getdebugidx` on 1.12 and \
+from `codelocs`/`linetable` on 1.11, and a callee spells itself `Core.TypeEgal{T}` on 1.14-DEV \
+where earlier versions say `Type{T}`. A verdict that moves with the compiler is not yet a covenant
+""" reach reach_script Reach Reached Unresolved verdict isclean combine dependents
+
 """
     Unresolved
 

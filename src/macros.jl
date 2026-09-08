@@ -5,8 +5,15 @@
 # the line it was written on. A report that says which call went through unvalidated code, and
 # where that call is, is a different thing from a list of names.
 
+@experimental """
+the report is a text format with no schema, and it has already changed twice in its first week — \
+the hit lines gained a sort order and column alignment, the footer a singular verb. Anything that \
+parses this output is parsing a guess
+""" @entered
+
 """
     @entered expr
+    @entered io expr
 
 Evaluate `expr`, print which marked definitions it went through, and return its value.
 
@@ -76,14 +83,28 @@ measurement in its docstring), and for the [`Record`](@ref) as data. This return
     so at global scope no `y` appears afterwards. Write `y = @entered f(x)` instead — which is
     what the value coming back is for.
 
+The report goes to `stdout` unless an `io` is named first — `@entered log sweep(model)` puts it in
+a file, `@entered devnull f(x)` throws it away and leaves only the value. The default is looked up
+when the block runs rather than when the macro expands, so `redirect_stdout` still catches it.
+
 See also [`entered`](@ref) for the whole-process question, [`record`](@ref) for the full
 instrument, and [`reach`](@ref) for the same question asked without running anything.
 """
 macro entered(ex)
-    src = __source__
+    return _entered_expr(:stdout, ex, __source__)
+end
+
+macro entered(io, ex)
+    return _entered_expr(esc(io), ex, __source__)
+end
+
+# One body for both arities. `io` arrives already escaped when the caller named one, and as the
+# bare symbol `stdout` when they did not — resolved in this module at run time, so the destination
+# is not frozen at macroexpansion and `redirect_stdout` still reaches it.
+function _entered_expr(io, ex, src::LineNumberNode)
     return quote
         local rec = $(record)(() -> $(esc(ex)); paths=false, timing=false)
-        $(_report_entered)(stdout, rec, $(QuoteNode(ex)), $(QuoteNode(src)))
+        $(_report_entered)($io, rec, $(QuoteNode(ex)), $(QuoteNode(src)))
         rec.value
     end
 end

@@ -126,6 +126,23 @@ It is loaded by the package being marked, so it is a normal dependency — but i
 beyond `TOML`, and `Test` only through a package extension, so a consumer of your package never
 loads `Test` because of this.
 
+## What this package declares about itself
+
+Five of its own layers are marked [`@experimental`](@ref), and the reasons are the ones this
+package asks of everybody else — a fact you could not write without having gone and looked:
+
+| layer | why it is not settled |
+|---|---|
+| [`record`](@ref) and the `Record` it returns | the struct gained a field after `write_record` already had a file format, and `paths` and `timing` are refused together because the pair segfaulted 2 runs in 4 |
+| [`@entered`](@ref) | its report is text with no schema, and it changed twice in its first week |
+| [`reach`](@ref) | where `:clean` stops and `:unknown` starts is drawn by Julia's internal IR accessors, which differ by minor version |
+| [`verification`](@ref) | the counts come from `jl_write_coverage_data` and the `.cov` line format, neither of which Julia documents |
+| [`snapshot`](@ref) and [`compare`](@ref) | the file format was a guess, and making it signature-aware changed it |
+
+`@experimental`, [`entered`](@ref) and [`audit`](@ref) — the three questions on this page — are
+not marked, and a test asserts they are not. A package that declared everything would be telling
+you nothing.
+
 ## Where to go next
 
 - [Declaring](@ref) — the forms `@experimental` accepts, and what it refuses

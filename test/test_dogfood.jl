@@ -1,30 +1,121 @@
 # The package runs its own check on itself. Every public name of ExperimentalAPI is either
-# documented or declared @experimental — including the release layer, which is declared because
-# its file format is a guess, not because declaring it was convenient.
+# documented or declared @experimental — including four whole layers that are declared because
+# what they rest on is a guess, not because declaring them was convenient.
 
-using ExperimentalAPI: ExperimentalAPI, audit, experimental, test_surface
+using ExperimentalAPI: ExperimentalAPI, audit, experimental, isexperimental, test_surface
 using Test
 
 @testset "ExperimentalAPI accounts for its own surface" begin
     test_surface(ExperimentalAPI)
 end
 
-@testset "the release layer says what it is" begin
+# Which layers say they are not settled, and the fact each one's reason has to name. The anchor is
+# a measured detail rather than the word "experimental", because a reason that could be written
+# without doing the measurement is the placeholder this package exists to refuse.
+const YOUNG_LAYERS = Dict(
+    :release => (
+        "schema",
+        [
+            :snapshot,
+            :read_snapshot,
+            :write_snapshot,
+            :compare,
+            :compare_methods,
+            :isbreaking,
+            :stamp,
+            :Diff,
+            :MethodDiff,
+        ],
+    ),
+    :record => (
+        "segfault",
+        [
+            :record,
+            :recording,
+            :Record,
+            :Hit,
+            :Attribution,
+            :attribute,
+            :experimental_fraction,
+            :merge_records,
+            :write_record,
+            :read_record,
+            :assert_clean,
+            :TimingBackend,
+            :timing_backend,
+        ],
+    ),
+    :macros => ("changed twice", [Symbol("@entered")]),
+    :reach => (
+        "getdebugidx",
+        [
+            :reach,
+            :reach_script,
+            :Reach,
+            :Reached,
+            :Unresolved,
+            :verdict,
+            :isclean,
+            :combine,
+            :dependents,
+        ],
+    ),
+    :verify => (
+        "jl_write_coverage_data",
+        [
+            :verification,
+            :Verification,
+            :coverage,
+            :coverage_enabled,
+            :unverified,
+            :stale_marks,
+            :flush_coverage,
+        ],
+    ),
+)
+
+@testset "the young layers say what they are" begin
     declared = Set(mk.name for mk in experimental(ExperimentalAPI))
-    @test declared == Set([
-        :snapshot,
-        :read_snapshot,
-        :write_snapshot,
-        :compare,
-        :compare_methods,
-        :isbreaking,
-        :stamp,
-        :Diff,
-        :MethodDiff,
-    ])
-    for mk in experimental(ExperimentalAPI)
-        @test occursin("schema", mk.reason)      # the reason is the real one, not a placeholder
+    @test declared == Set(Iterators.flatten(last(v) for v in values(YOUNG_LAYERS)))
+    for (layer, (anchor, names)) in YOUNG_LAYERS, n in names
+        mk = only(ExperimentalAPI.marks(ExperimentalAPI, n))
+        @test occursin(anchor, mk.reason)
         @test !isempty(strip(mk.reason))
+    end
+end
+
+@testset "the settled core is not declared experimental" begin
+    # The control the testset above cannot be: an equality against a hand-written set is satisfied
+    # by marking every name and updating the set to match. These are the names the front page
+    # promises answers from, and a promise is exactly what a mark withdraws.
+    for n in [
+        Symbol("@experimental"),
+        :Mark,
+        :mark,
+        :marks,
+        :marks_on,
+        :isexperimental,
+        :experimental,
+        :experimental_methods,
+        :Probe,
+        :entered,
+        :probes,
+        :detecting,
+        :summary_text,
+        :marked_modules,
+        :Audit,
+        :audit,
+        :surface,
+        :stable,
+        :isdocumented,
+        :own_methods,
+        :contributed_methods,
+        :ready_to_promote,
+        :age,
+        :docstring_note,
+    ]
+        @test n in audit(ExperimentalAPI).surface
+        @test !isexperimental(ExperimentalAPI, n)
     end
 end
 
