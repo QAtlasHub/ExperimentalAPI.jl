@@ -196,3 +196,26 @@ end
     @test Base.ispublic(ExperimentalAPI, Symbol("@entered"))
     @test !Base.isexported(ExperimentalAPI, Symbol("@entered"))
 end
+
+@testset "@entered writes where it is told, and only there" begin
+    # The knob exists because the report is text on a stream: a caller who wants it in a log, or
+    # does not want it at all, otherwise has to redirect the whole process to get at one line.
+    buf = IOBuffer()
+    value, printed = grab() do
+        ExperimentalAPI.@entered buf MacroFixture.energy(2.0)
+    end
+    @test value == MacroFixture.energy(2.0)
+    report = String(take!(buf))
+    @test occursin("@entered", report)
+    @test occursin("MacroFixture.energy", report)
+    # Control: naming an `io` MOVES the report rather than copying it. Without this the two-arg
+    # form would pass while still printing to the terminal.
+    @test isempty(printed)
+
+    # And the default is still looked up when the block runs, not when the macro expands, so a
+    # redirect around the call reaches it.
+    _, printed2 = grab() do
+        ExperimentalAPI.@entered MacroFixture.energy(2.0)
+    end
+    @test occursin("@entered", printed2)
+end

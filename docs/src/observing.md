@@ -156,8 +156,11 @@ julia> ExperimentalAPI.@entered sweep(model; βs = 0.05:0.05:2.0)
 0.42713…
 ```
 
-It returns the value of the expression, so it drops into existing code the way `@time` does. The
-last line is what makes a clean answer mean anything:
+It returns the value of the expression, so it drops into existing code the way `@time` does — with
+one divergence `@time` does not have, since `record` takes a function and the expression therefore
+runs inside a closure: a `return` inside it returns from the closure, and `@entered y = f(x)` binds
+`y` inside the closure. Write `y = @entered f(x)`. The last line is what makes a clean answer mean
+anything:
 
 ```julia
 julia> ExperimentalAPI.@entered publish(result)
@@ -169,11 +172,15 @@ julia> ExperimentalAPI.@entered publish(result)
 not adopted this yet is in the second one. A report that could not tell them apart would read as
 reassurance on a package where nothing had ever been declared.
 
-It returns the record's `value`, which is what `record` now carries out of the block, so measuring
-a call does not cost its result. It is `record(() -> expr; paths = false, timing = false)` plus
-the report — the cheap question,
-`which` and `how often`, needing neither a backtrace nor a sampler. For call paths, time (never
-both — see [`record`](@ref)), or the [`Record`](@ref) as data, call [`record`](@ref).
+What it returns is the record's `value` — `record` carries the block's result out, so measuring a
+call does not cost you that result. It is `record(() -> expr; paths = false, timing = false)` plus
+the report: the cheap question, `which` and `how often`, needing neither a backtrace nor a sampler.
+For call paths, time (never both — see [`record`](@ref)), or the [`Record`](@ref) as data, call
+[`record`](@ref).
+
+Name an `io` first to send the report somewhere else — `@entered log sweep(model)` into a file,
+`@entered devnull f(x)` to keep only the value. The default is looked up when the block runs, not
+when the macro expands, so `redirect_stdout` still catches it.
 
 The route is deliberately not printed: a captured path is a list of frame names, and Base's
 higher-order functions are in it. Measured for `driver(x, n) = sum(inner(x) for _ in 1:n)`, the

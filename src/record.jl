@@ -8,6 +8,13 @@
 # and the write side — which is a function call, not an inlined store — does the counting. Nothing
 # in the body changes, and nothing outside `record` pays for any of it.
 
+@experimental """
+the record's shape and its collection knobs are both still moving: `Record` gained a field after \
+`write_record` already had a file format, so a file written by an earlier version reads back with \
+that field empty, and `paths` and `timing` are refused together because the pair segfaulted 2 runs \
+in 4 where each alone crashed 0 in 4
+""" record recording Record Hit Attribution attribute experimental_fraction merge_records write_record read_record assert_clean TimingBackend timing_backend
+
 """
     Hit
 

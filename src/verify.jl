@@ -9,6 +9,12 @@
 # Julia writes at exit, because a test that has to wait for the process to end cannot assert
 # anything.
 
+@experimental """
+the counts come from two interfaces Julia does not document — `ccall(:jl_write_coverage_data, …)` \
+to flush from the running process, and the `.cov` line format to read them back — so a Julia \
+release can change what this reports without anything here changing
+""" verification Verification coverage coverage_enabled unverified stale_marks flush_coverage
+
 """
     Verification
 
