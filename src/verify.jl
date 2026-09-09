@@ -211,10 +211,6 @@ function _find_span(x, line::Int, outer_end::Int)
     (x isa Expr) || return nothing
     for (a, b, st) in _sibling_spans(x, outer_end)
         a == line && return (a, b)
-        # The documented-and-marked definition is the shape this package asks for — `audit` wants
-        # a docstring on every public name AND a mark on the unfinished ones — and it was the one
-        # shape whose coverage came back `missing`, because no sibling started on `mk.line`. The
-        # span is still this sibling's; only where it starts moved.
         (_is_doc_call(st) && a < line <= b) && return (line, b)
         (a <= line <= b) || continue
         for body in _containers(st)

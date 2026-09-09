@@ -26,12 +26,7 @@ end
 
 @experimental "shipped without ever being called" never_exercised(x) = x * 0
 
-"""
-    documented_and_marked(x)
-
-Documented AND marked, which is the shape `audit` asks for: a docstring is owed either way, and
-the mark is the second account. It is also the shape whose coverage came back `missing`.
-"""
+"Documented and marked — the shape `audit` asks for, and the one whose coverage came back `missing`."
 @experimental "documented, and still unfinished" documented_and_marked(x) = x + 2
 
 end # module Covered
@@ -47,15 +42,9 @@ end # module Covered
 end
 
 @testset "a docstring above the mark does not hide the coverage" begin
-    # `"docstring"` above a definition parses into ONE statement, `Core.@doc "…" <definition>`,
-    # whose start line is the docstring's. The span search matched a sibling starting exactly on
-    # `mk.line`, nothing started there, and the fraction came back `missing` — "no information" —
-    # for a definition that had just run. Measured: entered once each in the same process, the
-    # bare mark reported 1/1 and the documented one 0/0 `missing`.
-    #
-    # It matters because this is the shape the package RECOMMENDS. `audit` asks every public name
-    # for a docstring and the unfinished ones for a mark, so a package following the advice got
-    # the broken half.
+    # Measured: entered once each in one process, bare reported 1/1 and documented 0/0 `missing`,
+    # because the docstring makes the pair one statement starting on the docstring's line. The
+    # documented-and-marked shape is the one `audit` asks for.
     vs = Dict(v.mark.name => v for v in ExperimentalAPI.verification(Covered))
     doc = vs[:documented_and_marked]
     bare = vs[:exercised]

@@ -633,10 +633,8 @@ end
 end
 
 @testset "attribute refuses a Record by name instead of failing inside Profile" begin
-    # The mistake the API sets a user up for: `record` hands back a `Record`, `attribute` is the
-    # neighbouring verb, and `attribute(rec)` failed with
-    # `MethodError: no method matching getdict(::Record)` — naming neither the function the caller
-    # wrote nor the argument they passed. `attribute` takes a profile BUFFER.
+    # `attribute` takes a profile buffer. Given the `Record` next door it failed inside `Profile`
+    # with `no method matching getdict(::Record)`.
     rec = ExperimentalAPI.record(() -> Sim.driver(M, 3); paths=false, timing=false)
     e = try
         ExperimentalAPI.attribute(rec)
@@ -653,13 +651,8 @@ end
 end
 
 @testset "a record read where its module is not loaded says Main, and that is stated" begin
-    # The cross-process case the file format exists for: record on the machine that ran the job,
-    # merge somewhere else. A file carries a module's NAME, and `Hit.mod` is a `Module`, so a
-    # reader that never loaded the package has nothing to resolve it to.
-    #
-    # Measured: resolving works when the module is present, and falls back to `Main` when it is
-    # not — so a merged report reads `Main.energy` for a name that does not exist in `Main`. The
-    # docstring says so; this is what keeps it saying so.
+    # A file carries a module's name; `Hit.mod` is a `Module`. Present here it resolves, absent it
+    # falls back to `Main` — so a merged report reads `Main.energy` for a name not in `Main`.
     dir = mktempdir()
     p = joinpath(dir, "rec.toml")
     rec = ExperimentalAPI.record(() -> Sim.driver(M, 3); paths=false, timing=false)
@@ -683,8 +676,8 @@ end
         String,
     )
     parts = split(strip(out))
-    @test parts[1] == "Main"                          # absent: the documented fallback
-    @test parts[2] == String(only(rec).name)          # …and the name and count still cross over
+    @test parts[1] == "Main"
+    @test parts[2] == String(only(rec).name)
     @test parts[3] == string(only(rec).count)
 end
 
