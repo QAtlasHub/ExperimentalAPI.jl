@@ -1,12 +1,10 @@
 # The opt-in layer: how often a run entered marked code, by which paths, and how much of the run
 # was spent inside it.
 #
-# The boundary against the default layer was measured rather than chosen (`test/spec/README.md`).
 # A counter in the body costs 3.76x on eight threads and loses 40% of its increments to races
-# unless it is atomic; a set-once flag is free. So the flag stays, and `record` reaches the same
-# statement from the other side: opening a recording clears every probe, the short-circuit fails,
-# and the write side — which is a function call, not an inlined store — does the counting. Nothing
-# in the body changes, and nothing outside `record` pays for any of it.
+# unless atomic; a set-once flag is free. So `record` reaches the same statement from the other
+# side: opening a recording clears every probe, the short-circuit fails, and the write side — a
+# call, not an inlined store — counts.
 
 @experimental """
 the record's shape and its collection knobs are both still moving: `Record` gained a field after \
@@ -127,9 +125,8 @@ end
 # ── the timing backend ───────────────────────────────────────────────────────────────────────
 #
 # Sampling is the only way to say how much of a run was spent inside a definition without wrapping
-# the call, and wrapping is exactly what the emitted statement may not do. The sampler is Julia's
-# own, reached through an extension so that `using ExperimentalAPI` — which every marked package
-# does at run time — never loads `Profile`.
+# the call. Julia's own sampler, behind an extension so that `using ExperimentalAPI` never loads
+# `Profile`.
 
 """
     TimingBackend
@@ -257,17 +254,12 @@ function record(
         closed[] && return nothing
         closed[] = true
         sampled && stop_timing!(timing_backend())
-        # The probe set is re-derived here rather than reused from before the call. A mark can
-        # come into existence WHILE the block runs — a package extension loaded by `f` is the
-        # ordinary way — and a probe that was not in the snapshot is entered by code that ran,
-        # counted by nobody, and left with its flag `false` for the rest of the process. That
-        # loses the entry from `entered()` and from the exit summary too, which is the one thing
-        # the default layer promises never to do.
+        # Re-derived, not reused from before the call: a mark can come into existence WHILE the block
+        # runs — a package extension loaded by `f` is the ordinary way — and a probe missing from the
+        # snapshot is left `false` for the rest of the process, losing it from `entered()` too.
         #
-        # `invokelatest`, because reading those probes is the whole point and their bindings are
-        # younger than this frame: `probes()` reaches `M.__EXPERIMENTAL_API_ENTERED_newborn__`,
-        # created while `f` ran. Julia 1.12 warns that reading a binding in a world prior to its
-        # definition world will be an error.
+        # `invokelatest` because those bindings are younger than this frame; 1.12 warns that reading one
+        # in a world prior to its definition will become an error.
         append!(measured, Base.invokelatest(probes))
         for p in measured
             counts[p] = _probe_count(p) - get(before, p, 0)
@@ -293,11 +285,8 @@ function record(
     catch e
         err = e
         if rethrow
-            # Closed here, and re-raised from inside the `catch`, because that is the only place
-            # the exception's own backtrace survives. Closing first and calling `throw(err)`
-            # afterwards — which is what this did — manufactures a fresh backtrace rooted in this
-            # function, so the caller debugging a failed run sees `record.jl` where their own call
-            # chain should be.
+            # Re-raised from inside the `catch`, the only place the exception's own backtrace survives.
+            # Closing first and `throw(err)` afterwards manufactures one rooted in `record.jl`.
             close!()
             Base.rethrow()
         end

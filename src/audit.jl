@@ -1,14 +1,10 @@
-# The check. Everything above this file is material; this is the part that turns a marker into
-# something that can fail.
+# The check: the part that turns a marker into something that can fail.
 #
-# The name half of the audit is one set difference: public surface, minus the names with a
-# docstring, minus the names with a mark. What is left is the set of names a caller can reach and
-# nobody has said anything about — and it is exactly the set that a package cannot leave non-empty
-# once this runs in CI.
+# The name half is one set difference — public surface, minus documented, minus marked.
 #
-# The method half exists because `names(m)` cannot see a method a package contributed to somebody
-# else's generic, and for a package whose surface IS such methods — `fetch(model, quantity)` with
-# 570 of them — a clean name audit reports nothing while covering nothing.
+# The method half exists because `names(m)` cannot see a method contributed to somebody else's
+# generic. For a package whose surface IS such methods (`fetch` with 570 of them) a clean name
+# audit reports nothing while covering nothing.
 
 """
     surface(m::Module) -> Vector{Symbol}
@@ -93,11 +89,8 @@ This answers *whether prose exists*, never whether it is any good. A docstring r
 documented as far as this package is concerned.
 """
 function isdocumented(m::Module, name::Symbol)
-    # `Docs.hasdoc` is public API — `public`, and exported from `Base.Docs`. Its set-valued
-    # sibling `Docs.undocumented_names` answers the same question for a whole module at once and
-    # is what `Aqua.test_undocumented_names` is built on; the per-name form is used here because
-    # `audit` has to tell a module's own gap apart from a dependency's, and the set form reports
-    # a re-exported name's missing docstring as though it were this module's to fix.
+    # `Docs.hasdoc` is public API. The per-name form rather than `Docs.undocumented_names` because the
+    # set form reports a re-exported name's missing docstring as this module's to fix.
     return Base.Docs.hasdoc(m, name)
 end
 
@@ -105,10 +98,8 @@ function isdocumented(m::Method)
     id = _ftype_identity(_sig_ftype(m.sig))
     owner = id === nothing ? m.module : id.mod
     name = id === nothing ? m.name : id.name
-    # Only the module that WROTE the method is asked. `Docs` files a docstring under the
-    # binding's module but in the *writing* module's table, so this is the right table — and
-    # looking in the owner's as well would let the generic's own docstring, whose key is
-    # `Tuple{Any, Any}`, account for all 570 methods anybody ever contributed to it.
+    # Only the module that WROTE the method. Looking in the owner's table too would let the generic's
+    # own docstring, keyed `Tuple{Any, Any}`, account for every method contributed to it.
     d = try
         Base.Docs.meta(m.module; autoinit=false)
     catch
@@ -138,10 +129,9 @@ function _argument_tuple(@nospecialize(sig))
     end
 end
 
-# Whether a mark says anything about `m`'s own public surface. A mark that attached to a
-# signature is asked about the generic it extends, not about whether the name happens to be bound
-# here: `using ..Upstream` leaves no binding for `fetch_value`, and reading that absence as "ours"
-# would report every contributed method as a dangling promise.
+# Whether a mark says anything about `m`'s own surface. A signature mark is asked about the
+# generic it extends: `using ..Upstream` leaves no binding, and reading that absence as "ours"
+# would report every contributed method as dangling.
 function _is_surface_claim(m::Module, mk::Mark)
     if mk.sig !== nothing
         id = _ftype_identity(_sig_ftype(mk.sig))
@@ -166,15 +156,12 @@ function _is_own(m::Module, name::Symbol)
     end
 end
 
-# `own_methods` is a scan over every public callable of every loaded module — 1916 candidates and
-# 11026 methods behind them for this package — and a suite that audits several modules pays it once
-# per audit. Its ANSWER, though, is "the methods whose defining module is `m`", and that set can
-# only change when a method is defined or deleted. Both bump the world counter: measured on 1.11.9,
-# 1.12.2 and 1.14.0-DEV, a method definition bumps it in all three.
+# A scan over every public callable of every loaded module — 1916 candidates, 11026 methods here.
+# The answer changes only when a method is defined or deleted, and a method definition bumps the
+# world counter on 1.11.9, 1.12.2 and 1.14.0-DEV alike.
 #
-# A `const` binding does NOT bump it on 1.11 (it does on 1.12 and later), which is why the key is
-# argued rather than assumed. A new `const` cannot change this answer: either it aliases something
-# whose methods belong to another module, or creating it defined a method and bumped the counter.
+# A `const` does NOT bump it on 1.11, but cannot change this answer either: it aliases something
+# whose methods belong elsewhere, or creating it defined a method.
 const _OWN_METHODS = Ref{Tuple{UInt64,Dict{Module,Vector{Method}}}}((
     typemax(UInt64), Dict{Module,Vector{Method}}()
 ))
@@ -223,10 +210,8 @@ function _own_methods(m::Module)
             mm.module === m && !(mm in seen) && (push!(seen, mm); push!(out, mm))
         end
     end
-    # The key is built ONCE per method, not once per comparison. `sort!(…; by = f)` calls `f` on
-    # both sides of every comparison, and `string(mm.sig)` is not cheap: measured on this
-    # package's own 301 methods, the sort was 0.601s while building all 301 keys was 0.039s. That
-    # one line was 80% of `audit`, which is called once per module in every surface check.
+    # Keys built once per method: `sort!(…; by = f)` calls `f` on both sides of every comparison. On
+    # 301 methods the sort was 0.601s and building all 301 keys 0.039s.
     return out[sortperm([(string(mm.name), string(mm.sig)) for mm in out])]
 end
 
@@ -459,10 +444,8 @@ function audit(m::Module; methods::Bool=true)
             n in marked || push!(unaccounted, n)
         end
     end
-    # A mark on a generic another module owns is the foreign-method form — `Base.show(io, ::T)`
-    # — and it promises nothing about THIS module's surface, so it cannot dangle here;
-    # `contributed_methods` is where it is accounted for. A mark on something of our own that is
-    # not public does dangle, whether or not it carries a signature.
+    # A mark on another module's generic promises nothing about this surface, so it cannot dangle —
+    # `contributed_methods` accounts for it. A mark on something of ours that is not public does.
     dangling = sort!(
         unique(
             mk.name for mk in all_marks if _is_surface_claim(m, mk) && !(mk.name in surf)

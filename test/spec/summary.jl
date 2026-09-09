@@ -1,7 +1,5 @@
-# Generates the coverage table for `test/spec/README.md` and the pull request that ships it.
-#
-# The measure is DISTINCT BEHAVIOURS — one per leaf `@testset` — not assertions, which move
-# without any implementation progress when they sit inside a loop over the fixture's marks.
+# Generates the coverage table for `test/spec/README.md`. The measure is DISTINCT BEHAVIOURS — one
+# per leaf `@testset` — not assertions, which move without progress when they sit inside a loop.
 #
 # Run it:  julia --project=test test/spec/summary.jl
 

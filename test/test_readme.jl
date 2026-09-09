@@ -1,8 +1,5 @@
-# The README's primary example, executed.
-#
-# Scope: the first ```julia block only — the rest of the README uses `MyPackage` as illustration.
-# An example that does not run is the first thing a reader tries and the first thing that makes
-# them close the tab.
+# The README's primary example, executed — the first ```julia block only; the rest uses
+# `MyPackage` as illustration.
 
 using ExperimentalAPI
 using Test
@@ -59,11 +56,9 @@ end
 
 # ── every julia code block in the docs ───────────────────────────────────────────────────────
 #
-# Scope: a lint, not an execution. Most blocks reference a `MyPackage` that does not exist, so
-# they cannot be run — but the defect that shipped here was not a runtime one. A trailing `\`
-# used as a line continuation PARSES (Julia reads it as left-division) and fails only when the
-# macro is expanded, so neither a parse check nor a `jldoctest` would have caught it. The check
-# has to be for the character.
+# A lint, not an execution: most blocks reference a `MyPackage` that does not exist. The defect
+# that shipped was a trailing `\` line continuation, which PARSES as left-division and fails only
+# at macro expansion — so the check has to be for the character.
 
 "Every ```julia fence in `path`, as (line number, text) pairs."
 function julia_blocks(path)
@@ -134,9 +129,8 @@ end
 
 # ── the documentation pages ──────────────────────────────────────────────────────────────────
 #
-# Scope: `docs/src` gets the same treatment the README does. Twenty julia blocks were shipped
-# unexecuted, and two of them did not run — including the front page's, which is the defect the
-# registry review named for the README and which was fixed there and not here.
+# `docs/src` gets the same treatment. Twenty blocks shipped unexecuted and two did not run,
+# including the front page's.
 
 const _DOCS = joinpath(@__DIR__, "..", "docs", "src")
 
@@ -222,11 +216,9 @@ end
 
 # ── URLs inside examples ─────────────────────────────────────────────────────────────────────
 #
-# A placeholder URL must not look like a real address that fails. `github.com/org/Pkg.jl/issues/12`
-# resolved to GitHub and returned **404**, so a reviewer running a link checker saw a dead link —
-# which is the finding that opened the review of another package in this organisation.
-# `example.invalid` cannot resolve at all (RFC 2606 reserves it), which is what a placeholder
-# should look like. Checked without the network: the property is the host, not the response.
+# `github.com/org/Pkg.jl/issues/12` resolved to GitHub and returned 404, so a link checker saw a
+# dead link. `example.invalid` cannot resolve at all (RFC 2606). Checked without the network: the
+# property is the host, not the response.
 
 const _RESERVED_HOSTS = ["example.com", "example.net", "example.org", "example.invalid"]
 const _OWN_HOSTS = ["github.com/QAtlasHub/", "qatlashub.github.io/"]

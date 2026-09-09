@@ -1,27 +1,19 @@
-# The default layer: which marked definitions a run actually entered.
+# The default layer: which marked definitions a run entered. Presence, not counts, and only for
+# definitions with a body.
 #
-# Scope: presence, not counts, and only for definitions with a body. A mark written as a name list,
-# or attached to a struct, const, module or macro, is a declaration only — nothing observes it.
+# The statement the macro puts in a marked body reads one field and writes it once: 1.03x on one
+# thread, 0.985x on eight, over 10M calls of a numeric body. A shared counter is 3.76x at eight
+# threads and loses 40% of its increments to races unless atomic.
 #
-# The one statement the macro puts in a marked body reads a single field and writes it once:
-# measured at 1.03x on one thread and 0.985x on eight, over 10M calls of a numeric body. A flag
-# written once and only read afterwards stops dirtying the cache line, which a counter (3.76x at
-# eight threads, and losing 40% of its increments to races unless atomic) does not.
-#
-# `record` reaches the same statement without changing it: opening a recording clears every
-# probe's flag, so the short-circuit fails and the write side runs on every call. The cost of
-# counting is paid only inside `record`, and the fast path is one field load either way.
+# `record` reaches the same statement without changing it: opening a recording clears every flag,
+# so the short-circuit fails and the write side runs on every call.
 
 # Padding, in Int64 slots, between one thread's counter and the next. A cache line is 64 bytes on
 # every platform this runs on; two threads sharing one would serialise on the store.
 const _COUNTER_STRIDE = 8
 
-# How many distinct backtraces one probe keeps while recording, and how many times it will look.
-# A backtrace costs microseconds, so capturing one per call would dominate any run long enough to
-# be worth recording. The paths a marked definition is reached by are few and repeat, so the
-# attempt budget is what bounds the cost: without it, a definition reached by three paths would
-# keep paying for a backtrace on every one of ten million calls, having found its third path in
-# the first microsecond.
+# How many distinct backtraces one probe keeps, and how many times it will look. A backtrace costs
+# microseconds and the paths repeat, so the attempt budget is what bounds the cost.
 const _TRACE_CAP = 64
 const _TRACE_ATTEMPTS = 256
 
@@ -62,13 +54,10 @@ end
 # The fast path, and the only thing a marked body does when nothing is recording.
 Base.getindex(p::Probe) = p.entered
 
-# The write side. Reached once per process when nothing is recording, and on every call while a
-# recording is open — which is what makes counting cost nothing outside `record`.
+# The write side: once per process when nothing is recording, every call while one is open.
 #
-# `@noinline` for two reasons, and neither is speed on this path. It keeps the marked body small,
-# so the fast path is a load and a branch over a call; and it makes the call a real frame, so the
-# backtrace taken underneath it resolves to the marked definition rather than to whatever the
-# optimiser left at that address.
+# `@noinline` keeps the marked body small, and makes the call a real frame so a backtrace taken
+# underneath resolves to the marked definition.
 @noinline function Base.setindex!(p::Probe, v::Bool)
     if _RECORDING[]
         _hit!(p)
@@ -116,10 +105,9 @@ function _resize_hits!(p::Probe, tid::Int)
     return nothing
 end
 
-# The address list only. Resolving it to names here would mean walking the debug info while the
-# sampling profiler may be in its signal handler doing the same thing, and the two take the same
-# lock: `record`'s own paths would deadlock against its own timing. `_trace_names` is called
-# once, at the end of the block, with the sampler stopped.
+# Addresses only. Resolving names here walks the debug info under the same lock the sampler takes
+# in its signal handler — paths would deadlock against timing. `_trace_names` runs at the end of
+# the block, sampler stopped.
 @noinline function _capture_trace!(p::Probe)
     bt = backtrace()
     @lock p.lock begin
@@ -197,26 +185,19 @@ probes() = reduce(vcat, (probes(m) for m in marked_modules()); init=Probe[])
 # What the macro puts in the body: one statement, a read that writes only on the first call.
 _probe(flag) = :($flag[] || ($flag[] = true))
 
-# Returns the definition with the probe spliced in, or `nothing` if this form has no body to
-# instrument.
+# The definition with the probe spliced in, or `nothing` if the form has no body.
 #
-# The `LineNumberNode` is the declaration's own, and it is load bearing rather than cosmetic. The
-# write side is a cold branch, so the optimiser is free to sink it to the end of the function;
-# without a location of its own it inherits whichever statement happens to be next, and a
-# backtrace taken inside it then resolves to that statement's inlining context instead of to the
-# marked definition. `record`'s call paths are built out of exactly that.
+# The `LineNumberNode` is load bearing: the write side is a cold branch the optimiser may sink, and
+# without its own location it inherits the next statement's — a backtrace taken inside it then
+# resolves to that statement's inlining context, which is what `record`'s paths are built from.
 function _instrument(def, flag, src::LineNumberNode)
     def isa Expr || return nothing
     if def.head === :macrocall
-        # An annotating macro — `@inline` and its neighbours — leaves the body alone, so the probe
-        # rides inside the definition it wraps and the wrapper is rebuilt around the result. Only
-        # those reach here: `_subject` marks a macrocall instrumentable exactly when the macro is
-        # in `_ANNOTATING_MACROS`, and refuses or opts out of every other one.
+        # An annotating macro leaves the body alone, so the probe rides inside and the wrapper is rebuilt
+        # around it. Only `_ANNOTATING_MACROS` reach here.
         #
-        # Returning `nothing` here instead — which is what this did — did not merely lose the
-        # observation. The flag is registered either way, so `@experimental "…" @inline f(x) = x`
-        # counted as an observable definition that no call could ever set: `entered` reported it
-        # as not entered no matter what ran, and `unverified` reported it forever.
+        # Returning `nothing` registered the flag anyway, so `@experimental "…" @inline f(x) = x` counted
+        # as observable and no call could ever set it.
         inner = _instrument(def.args[end], flag, src)
         inner === nothing && return nothing
         return Expr(:macrocall, def.args[1:(end - 1)]..., inner)
@@ -314,11 +295,9 @@ function marked_modules()
     return out
 end
 
-# Cached per world age. The walk is over every binding of every loaded module, and `record` asks
-# for it twice per block — with a large dependency tree loaded that is the most expensive thing
-# in a recording that counts a hundred calls. Keying on the world counter is exact rather than
-# approximate: a module gains a registry only by defining a `const`, and defining one advances
-# the counter.
+# Cached per world age: the walk is over every binding of every loaded module and `record` asks
+# twice per block. Exact, not approximate — a module gains a registry only by defining a `const`,
+# which advances the counter.
 const _MARKED_MODULES = Ref{Tuple{UInt64,Vector{Module}}}((typemax(UInt64), Module[]))
 
 function _walk_modules!(out::Vector{Module}, seen::Set{Module}, m::Module)

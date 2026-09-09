@@ -1,9 +1,6 @@
-# `@entered expr` — the expression-level spelling of the observing layer.
-#
-# Scope: what the macro adds over `record(() -> expr)`. Two of those are things only a macro can
-# get wrong — evaluating its argument twice, and reporting a location that is not the caller's —
-# and one is the distinction the whole report exists for: a call that entered nothing is not the
-# same state as a package that has nothing marked.
+# `@entered expr` — what the macro adds over `record(() -> expr)`. Two are things only a macro can
+# get wrong (evaluating its argument twice, reporting somebody else's location); one is the
+# distinction the report exists for — entering nothing is not the same as nothing being marked.
 
 using ExperimentalAPI: ExperimentalAPI, @experimental
 using Test

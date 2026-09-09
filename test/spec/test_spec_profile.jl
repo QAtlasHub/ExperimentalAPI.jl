@@ -1,8 +1,6 @@
 # What a real run went through: which marked definitions it entered, how often, and how much of
-# the run was spent inside them.
-#
-# Scope: two layers. Presence is detected by default and must cost nothing; counts, call sites
-# and paths are opt-in. The measurements that put the boundary there are in `README.md`.
+# the run was spent inside them. Presence is on by default and must cost nothing; counts, call
+# sites and paths are opt-in. The measurements behind that boundary are in `README.md`.
 
 using ExperimentalAPI: ExperimentalAPI, @experimental
 using Profile: Profile
@@ -197,12 +195,9 @@ end
 # ── proportion, not just presence ────────────────────────────────────────────────────────────
 
 @testset "the record says what fraction of the run was inside experimental code" begin
-    # Long enough to be sampled: the timing backend is Julia's sampling profiler, and a run that
-    # finishes inside one sampling interval has no fraction to report. Two million iterations of
-    # a recorded body is tens of milliseconds — hundreds of samples, not a handful.
-    # `paths = false` because the two instruments cannot be read at once: `backtrace()` and the
-    # sampler both unwind the same threads' stacks, and asking for both is refused — see the
-    # measurement in `record`'s docstring, and the testset that pins the refusal below.
+    # Long enough to be sampled: a run finishing inside one sampling interval has no fraction to
+    # report. Two million iterations is tens of milliseconds — hundreds of samples. `paths = false`
+    # because the pair is refused; the measurement is below.
     r = ExperimentalAPI.record(() -> Sim.driver(M, 2_000_000); paths=false, timing=true)
     @test r.sampled                                   # …the backend really was loaded
     f = ExperimentalAPI.experimental_fraction(r)
@@ -315,16 +310,12 @@ end
 end
 
 @testset "paths and time cannot be collected in one block" begin
-    # A conjunction, and each half was measured alone before the pair was refused. `backtrace()`
-    # unwinds the calling thread; the sampler unwinds the same threads from outside. 1.12.7, 150
-    # threaded records per run, four runs of each combination:
+    # A conjunction, each half measured alone first. `backtrace()` unwinds the calling thread; the
+    # sampler unwinds the same threads from outside. 1.12.7, 150 threaded records per run:
     #
     #     paths alone   0/4 crashed
     #     timing alone  0/4
     #     both          2/4   segmentation fault, no Julia backtrace
-    #
-    # So the pair is refused rather than risked, and the refusal names the measurement rather
-    # than saying "unsupported".
     e = try
         ExperimentalAPI.record(() -> Sim.driver(M, 1); paths=true, timing=true)
         nothing
@@ -371,14 +362,9 @@ end
 end
 
 @testset "a mark born while the block runs is measured, not lost" begin
-    # The probe set was snapshotted BEFORE the call and never re-derived, so a mark that came
-    # into existence while `f` ran was entered by code that ran, counted by nobody, and left with
-    # its flag `false` for the rest of the process. That loses the entry from the OPT-IN layer and
-    # from the always-on one — `entered()` and the exit summary — which is the one thing the
-    # default layer promises never to do.
-    #
-    # A package extension loaded inside the block is the ordinary way this happens, and this
-    # package ships three of them; `Core.eval` is the same event without the loading machinery.
+    # The probe set was snapshotted before the call and never re-derived, so a mark born while `f` ran
+    # was left `false` for the rest of the process — lost from `entered()` and the exit summary too.
+    # A package extension loaded inside the block is the ordinary way this happens.
     @eval module Newborn
     using ExperimentalAPI
     public settled_mark
@@ -545,14 +531,11 @@ end
 end # module Hot
 
 @testset "recording does not disturb Profile" begin
-    # `with_profile = true` means the caller is already using the buffer: whatever is in it stays.
+    # `with_profile = true`: whatever is in the buffer stays.
     #
-    # Two things this measures rather than assumes. The buffer has to be filled by a run that is
-    # long compared with the sampling interval — `Sim.driver(M, 200_000)` is about one interval at
-    # the default rate, and came back with **zero** samples on macOS, which made the whole
-    # assertion a coin flip. And the size is read with `Profile.len_data`, not by fetching:
-    # `fetch(; include_meta = false)` strips metadata behind an `@assert` that fires on
-    # 1.14.0-DEV.3115 for a buffer this test did not fill.
+    # The filling run must be long compared with the sampling interval — `Sim.driver(M, 200_000)` is
+    # about one interval and came back with zero samples on macOS. Size is read with
+    # `Profile.len_data`: `fetch(; include_meta = false)` hits an `@assert` on 1.14.0-DEV.3115.
     Hot.grind(10)
     Profile.clear()
     Profile.init(; delay=1e-5)

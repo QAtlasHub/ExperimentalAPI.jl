@@ -85,13 +85,9 @@ const YOUNG_LAYERS = Dict(
 end
 
 @testset "the settled core is not declared experimental" begin
-    # The control the testset above cannot be: an equality against a hand-written set is satisfied
-    # by marking every name and updating the set to match. These are the names the front page
-    # promises answers from, and a promise is exactly what a mark withdraws.
-    #
-    # Hoisted, and not for tidiness: `audit(ExperimentalAPI)` costs 0.75s — it reads a docstring
-    # for every public name and walks the method tables for the contributed ones — so calling it
-    # per iteration cost 17.8s, which was 16% of the whole suite.
+    # The control the testset above cannot be: an equality against a hand-written set is satisfied by
+    # marking every name and updating the set. `audit` is hoisted because it costs 0.75s — per
+    # iteration that was 17.8s, 16% of the suite.
     surface = audit(ExperimentalAPI).surface
     for n in [
         Symbol("@experimental"),

@@ -1,20 +1,15 @@
 # The measurement that could kill the design.
 #
-# Every other test in this suite marks a module defined in the running session, where any storage
-# scheme works. The state a consumer is actually in is different: the marks are written while the
-# consumer's package is being PRECOMPILED, in a process that then exits, and the query happens in
-# a later process that only ever sees the cache image. A registry living in ExperimentalAPI's own
-# state passes every other file here and returns an empty vector in that setting.
+# Every other test marks a module defined in the running session, where any storage scheme works.
+# A consumer's marks are written during PRECOMPILATION, in a process that then exits, and queried
+# later from the cache image — where a registry living in ExperimentalAPI's own state returns an
+# empty vector.
 #
-# So this runs a real package through a real precompile, in a scratch depot, in a subprocess, and
-# asks the loaded module what it is carrying. Twice: once compiling from source, once reading the
-# cache the first run wrote. Only the second run is evidence.
+# So: a real package, a real precompile, a scratch depot, a subprocess. Twice — compiling from
+# source, then reading the cache the first run wrote. Only the second run is evidence.
 #
-# It asks about all three KINDS of mark, because they are stored differently: a whole-name
-# declaration, a mark attached to a definition (which also carries the `Type` it created), and a
-# mark on a method of `Base.show`, whose signature names a type defined in the cached package.
-# Only the first of those had ever been through a cache. It also runs `reach` across the package
-# boundary, which is the query that reads the other two.
+# All three KINDS of mark, because they are stored differently: a name declaration, a mark on a
+# definition, and a mark on a `Base.show` method whose signature names a cached type.
 
 using Test: @test, @testset
 
@@ -73,13 +68,10 @@ function run_probe(env, depots)
     return parse_probe(read(subprocess_env(cmd, depots), String))
 end
 
-# The child's environment is BUILT, not patched. `Pkg.test` exports a JULIA_LOAD_PATH pointing at
-# its own temporary environment and omitting `@stdlib`; inherited, that overrides `--project` and
-# the child cannot even load Pkg. Deleting the variable outright — rather than overwriting it with
-# a hand-built list — leaves Julia's own default (`@:@v#.#:@stdlib`) in charge, which is both what
-# is wanted and one fewer platform-specific string to get right.
-#
-# `setenv` REPLACES the environment rather than adding to it, so the base has to be `copy(ENV)`.
+# The child's environment is BUILT, not patched: `Pkg.test` exports a JULIA_LOAD_PATH that omits
+# `@stdlib`, and inherited it overrides `--project` so the child cannot load Pkg. Deleting the
+# variable leaves Julia's own default in charge. `setenv` REPLACES the environment, so the base
+# has to be `copy(ENV)`.
 function subprocess_env(cmd, depots)
     env = copy(ENV)
     delete!(env, "JULIA_LOAD_PATH")

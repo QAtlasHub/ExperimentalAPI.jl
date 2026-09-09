@@ -1,9 +1,7 @@
-# One call site, several methods, only some of them marked.
+# One call site, several methods, only some marked.
 #
-# Scope: the call site the analysis cannot pin to one method. For a `Union`-typed or abstract
-# argument `which(f, T)` throws, and an implementation that catches that and moves on reports
-# `:clean` about a call that reaches a marked method half the time. That is the failure guarded
-# here.
+# For a `Union`-typed or abstract argument `which(f, T)` throws, and catching that and moving on
+# reports `:clean` about a call that reaches a marked method half the time.
 
 using ExperimentalAPI: ExperimentalAPI, @experimental, experimental, isexperimental, mark
 using Test

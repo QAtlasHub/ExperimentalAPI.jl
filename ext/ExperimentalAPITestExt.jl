@@ -14,10 +14,8 @@ using ExperimentalAPI:
     partition_holds
 using Test: Test, @test, @testset
 
-# The knobs below are the newest part of this package and the least settled: which of them a
-# project should turn on is a question no measurement has answered yet, and the answer will change
-# what they mean. The mark is written here, in the extension that defines them, which is also the
-# case `experimental(m; extensions = true)` exists for.
+# The newest part of the package: which of these a project should turn on is unmeasured. Marked
+# here, in the extension that defines them — the case `experimental(m; extensions = true)` is for.
 ExperimentalAPI.@experimental(
     "which gates a project should run, and therefore what these keywords should default to, is " *
         "undecided; `require_tracking` and `max_marks` may be replaced by one policy argument",
@@ -44,10 +42,8 @@ function ExperimentalAPI.test_surface(
     a = audit(m; methods)
     outputlevel ≥ 1 && show(stdout, MIME"text/plain"(), a)
     @testset "public surface of $(nameof(m))" begin
-        # Assertions that run whatever the audit found. Everything below iterates over a set of
-        # findings, so on a clean module all of it collapses to nothing and the testset would
-        # report `0 tests passed` — a green indistinguishable from the extension having failed to
-        # load, or from `m` having no public names at all. These make the pass mean something.
+        # Everything below iterates over findings, so a clean module reports `0 tests passed` — a green
+        # indistinguishable from the extension failing to load. These make the pass mean something.
         @testset "every public name has a docstring" begin
             @test isempty(setdiff(a.undocumented, skip))
             @test isempty(a.dangling)

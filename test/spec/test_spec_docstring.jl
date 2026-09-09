@@ -1,8 +1,5 @@
-# A mark and a docstring are different accounts, and must coexist.
-#
-# Scope: a mark is never a substitute for prose. `Base.Experimental` is the precedent — Base
-# marks an experimental surface AND documents it. Pinned by named entries rather than by a count,
-# which moves with the Julia version and the counting rule.
+# A mark and a docstring are different accounts and must coexist — `Base.Experimental` is the
+# precedent. Pinned by named entries, not by a count, which moves with the Julia version.
 
 using ExperimentalAPI:
     ExperimentalAPI, @experimental, audit, experimental, isdocumented, isexperimental, mark

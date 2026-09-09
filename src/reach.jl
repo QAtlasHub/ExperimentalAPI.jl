@@ -1,21 +1,15 @@
-# A caller that never names a marked thing still depends on it.
-#
-# Modelled on Lean's `sorry`, but Julia's call graph is not closed, so the answer is three-valued:
+# A caller that never names a marked thing still depends on it. Julia's call graph is not closed,
+# so the answer is three-valued:
 #
 #     :depends   a marked definition is reachable
 #     :clean     the whole call graph was resolved and nothing marked is in it
 #     :unknown   some call site could not be resolved — the honest non-answer
 #
-# Collapsing `:unknown` into `:clean` is the one failure this file exists to prevent. It is not a
-# weaker claim, it is a false one: `Holder.f::Function` and `TABLE[i](x)` really can reach a
-# marked function while being statically invisible.
+# Reporting `:unknown` as `:clean` is the one failure this file guards.
 #
-# The walk is over INFERRED, UNOPTIMISED IR — `code_typed_by_type(sig; optimize=false)`. Inference
-# runs before inlining, so every call is still a call and every argument still has a type;
-# `optimize=true` would show `mul_float` and find nothing. That also makes the two hard cases fall
-# out rather than needing special handling: a callee inference typed as `Function` is exactly a
-# call site with no unique method, and a function passed as a value is specialised on `typeof(f)`
-# and resolves.
+# The walk is over inferred, UNOPTIMISED IR — `code_typed_by_type(sig; optimize=false)`. Inference
+# runs before inlining, so every call is still a call and every argument has a type;
+# `optimize=true` shows `mul_float` and finds nothing.
 
 @experimental """
 the line between `:clean` and `:unknown` is drawn by Julia's own IR accessors, which are internal \
@@ -360,12 +354,9 @@ function reach_script(
             push!(body.args, st)
         elseif _is_toplevel_only(st)
             Core.eval(scratch, st)
-            # `const RESULT = simulate(model)` is a script's WORK wearing a declaration's syntax,
-            # and it is how a researcher writes the line that produces the figure. Evaluating it
-            # and stopping there analysed nothing: measured on a two-line script whose only call
-            # was a `const`, and the answer came back `:clean`. The binding still has to be made —
-            # a later `struct` may use it — so the value is computed at top level and the
-            # right-hand side is analysed as well.
+            # `const RESULT = simulate(model)` is a script's work wearing a declaration's syntax.
+            # Evaluating it and stopping there reported `:clean` for a two-line script whose only
+            # call was the `const`. The binding is still made and the right-hand side analysed too.
             rhs = _const_rhs(st)
             rhs === nothing || push!(body.args, rhs)
         else
@@ -373,11 +364,9 @@ function reach_script(
         end
     end
     thunk = Core.eval(scratch, Expr(:function, Expr(:call, gensym(:script)), body))
-    # `invokelatest`, because the walk reads the bindings the script's own `const` lines were just
-    # evaluated into and this call's world age was fixed before they existed. Julia 1.12 warns —
-    # "Detected access to binding … in a world prior to its definition world" — and says it will
-    # be an error in a future version. The analysis reads globals out of the IR, which is what
-    # makes this the one place in the package that reaches a binding younger than its caller.
+    # `invokelatest`: the walk reads bindings the script's `const` lines were just evaluated
+    # into, and this call's world age was fixed before they existed. 1.12 warns that it will
+    # become an error.
     r = Base.invokelatest(reach, thunk, Tuple{}; maxdepth, maxcandidates, maxwork, ignore)
     return Reach(
         path,
@@ -428,12 +417,9 @@ function _enter!(st::_Walk, match, depth::Int, path::Vector{Symbol})
         )
         return nothing
     end
-    # Depth bounds how FAR the walk goes, not how much of it there is: `maxdepth` levels each
-    # branching by `maxcandidates` is not a finite amount of work in any useful sense, and
-    # `visited` only prunes signatures that repeat. Measured on 1.14.0-DEV, `[f(x) for x in xs]`
-    # and `sum(map(f, xs))` produced new signatures faster than the depth limit could stop them
-    # and the call did not return; the same two answer in milliseconds on 1.12. So the walk also
-    # has a budget, and spends `:unknown` when it runs out — which is what `:unknown` is for.
+    # Depth bounds how far the walk goes, not how much of it there is, and `visited` only
+    # prunes signatures that repeat. Measured on 1.14.0-DEV, `[f(x) for x in xs]` and
+    # `sum(map(f, xs))` never returned; both answer in milliseconds on 1.12.
     if st.budget[] <= 0
         st.truncated = true
         push!(
@@ -445,10 +431,8 @@ function _enter!(st::_Walk, match, depth::Int, path::Vector{Symbol})
     st.budget[] -= 1
     sig in st.visited && return nothing
     push!(st.visited, sig)
-    # The flag `@experimental` emits is this package's own code, and under `ignore` the walk goes
-    # through it rather than stopping at the mark. Following it would report the recorder's
-    # internals — `backtrace`, and everything Base does to format one — as the caller's
-    # dependencies. Nothing in here is ever marked, so there is nothing to lose by stopping.
+    # Under `ignore` the walk goes through the mark into this package's own flag and would
+    # report `backtrace` and its formatting as the caller's. Nothing here is ever marked.
     Base.moduleroot(mm.module) === ExperimentalAPI && return nothing
     mm.module in st.modules || push!(st.modules, mm.module)
 
@@ -533,10 +517,9 @@ function _resolve_call!(st::_Walk, ci, stmt::Expr, pc::Int, mm::Method, depth::I
         pinned = _const_value(ci, args[3])
         if target !== nothing && pinned isa Type
             sig = Base.signature_type(target, pinned)
-            # `invoke` semantics, not dispatch semantics: the method chosen for arguments of the
-            # DECLARED type. Resolving `Tuple{typeof(more_specific), Integer}` by dispatch finds
-            # both `::Int` and `::Integer` and reports the site unresolved, which is exactly the
-            # over-caution an analysis that ignores `invoke` would show.
+            # `invoke` semantics, not dispatch: the method for the DECLARED type. By dispatch
+            # `Tuple{typeof(f), Integer}` matches both `::Int` and `::Integer` and the site would
+            # be reported unresolved.
             pin = try
                 which(sig)
             catch
@@ -610,15 +593,9 @@ function _resolve_sig!(
         push!(st.unresolved, Unresolved(name, sig, :nomethod, mm.file, line, mm, Mark[]))
         return nothing
     end
-    # Several methods match and nothing in the IR says which. Reporting `:depends` because one of
-    # them is marked would over-claim; reporting `:clean` because none is *proved* reached is the
-    # false answer this whole file guards.
-    #
-    # But "which method runs" is only worth knowing if the answer could differ. Every candidate is
-    # walked in its own right, and when none of them reaches anything marked the site is resolved
-    # after all — that is not a guess, it is having checked all of them. Without this,
-    # `convert(::Type, ::UInt32)` — dozens of matching methods, none of them anybody's research
-    # code — makes every caller that formats a string `:unknown`.
+    # Several methods match and nothing in the IR says which. Every candidate is walked, and
+    # if none reaches a mark the site resolves — checked, not guessed. Without this,
+    # `convert(::Type, ::UInt32)` makes every caller that formats a string `:unknown`.
     if length(matches) > st.maxcandidates
         push!(st.unresolved, Unresolved(name, sig, :ambiguous, mm.file, line, mm, Mark[]))
         return nothing
@@ -800,11 +777,9 @@ function _callee_name(ci, @nospecialize(x))
     end
     w = _widen(t === nothing ? Any : t)
     if w isa DataType && isdefined(w, :instance)
-        # `nameof` accepts a `Function`, a `Type` or a `Module` and nothing else. A struct whose
-        # fields are all singletons is itself a singleton, so `w.instance` exists for callables
-        # that are none of the three — `Base.MappingRF{…}`, which is what `sum(f(x) for x in xs)`
-        # lowers to. Asking that for a name threw a `MethodError` out of an analysis whose entire
-        # contract is to come back with one of three verdicts.
+        # `nameof` accepts only a `Function`, `Type` or `Module`. A struct whose fields are all
+        # singletons is itself one, so `w.instance` exists for callables that are none of the
+        # three — `Base.MappingRF{…}`, what `sum(f(x) for x in xs)` lowers to.
         inst = w.instance
         inst isa Union{Function,Type,Module} && return nameof(inst)
     end
@@ -828,11 +803,9 @@ function _tuple_type(@nospecialize(ft), args::Vector{Any})
     end
 end
 
-# Whether a type can be the first parameter of a signature that dispatch could pin. `Function`
-# and `Any` cannot: they are the shapes a field read or a table lookup produces.
-#
-# `Type{Float64}` is the exception the abstractness flag alone gets wrong. Julia marks it abstract,
-# but a constant type in call position is a constructor call and dispatch pins it exactly.
+# Whether a type can head a signature dispatch could pin. `Function` and `Any` cannot — they
+# are what a field read or a table lookup produces. `Type{Float64}` is marked abstract, but a
+# constant type in call position is a constructor call and pins exactly.
 function _is_callable_type(@nospecialize(ft))
     ft === Any && return false
     ft === Function && return false
@@ -843,13 +816,9 @@ function _is_callable_type(@nospecialize(ft))
     return true
 end
 
-# The `X` in `Type{X}`, or `nothing` if `t` is not a constant type.
-#
-# Spelled as a question about `t` rather than as `t isa DataType && t <: Type`, because both halves
-# of that moved: on 1.14-DEV `Type{X}` is no longer a `DataType`, and `Core.Typeof(Float64)`
-# returns the new `Core.TypeEgal{Float64}` rather than `Type{Float64}`. Measured on
-# 1.14.0-DEV.3115; the old spelling made every constructor call in the graph `:unknown`, which
-# reported four otherwise-clean fixtures as unresolved.
+# The `X` in `Type{X}`, or `nothing`. Not `t isa DataType && t <: Type`: on 1.14.0-DEV.3115
+# `Type{X}` is no longer a `DataType` and `Core.Typeof(Float64)` returns
+# `Core.TypeEgal{Float64}`. The old spelling made every constructor call `:unknown`.
 function _type_parameter(@nospecialize(t))
     (t isa Type && t <: Type && t !== Type) || return nothing
     ps = try
