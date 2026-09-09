@@ -760,7 +760,15 @@ function _callee_name(ci, @nospecialize(x))
         v isa Type && return nameof(v)
     end
     w = _widen(t === nothing ? Any : t)
-    w isa DataType && isdefined(w, :instance) && return nameof(w.instance)
+    if w isa DataType && isdefined(w, :instance)
+        # `nameof` accepts a `Function`, a `Type` or a `Module` and nothing else. A struct whose
+        # fields are all singletons is itself a singleton, so `w.instance` exists for callables
+        # that are none of the three — `Base.MappingRF{…}`, which is what `sum(f(x) for x in xs)`
+        # lowers to. Asking that for a name threw a `MethodError` out of an analysis whose entire
+        # contract is to come back with one of three verdicts.
+        inst = w.instance
+        inst isa Union{Function,Type,Module} && return nameof(inst)
+    end
     return :?
 end
 
