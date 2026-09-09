@@ -33,7 +33,7 @@ One call site the analysis could not pin to a method.
 |---|---|
 | `callee` | the name being called, as far as the IR knows it |
 | `signature` | what it was called with — the widened argument types |
-| `why` | `:dynamic`, `:ambiguous`, `:maxdepth`, `:splat` or `:nomethod` |
+| `why` | `:dynamic`, `:ambiguous`, `:maxdepth`, `:budget`, `:splat` or `:nomethod` |
 | `file`, `line` | where to go and look |
 | `within` | the method the call site is in |
 | `candidates` | the marked methods this site *could* reach, if any are visible |
@@ -92,7 +92,12 @@ What [`reach`](@ref) found.
 | `through_modules` | every module the walk went through |
 | `affected_entries` | for a module or script entry: the public entry points that are not clean |
 | `visited` | how many distinct signatures were inferred |
-| `truncated` | whether a depth limit stopped the walk |
+| `truncated` | whether a bound stopped the walk — `maxdepth` or `maxwork` |
+
+`truncated` is not cosmetic: when it is `true`, `reached` is a **lower bound**. Measured on a
+module with twelve marked definitions behind one loop, budgets between the two extremes report
+`:depends` with one, two, … of them found and the rest never walked to. `:depends` is still the
+right verdict, but "fix the one it named" is not the same as "fix everything it depends on".
 
 There is deliberately **no** `verdict` field. A stored verdict makes `:clean` with a non-empty
 `unresolved` representable, and that state is the single thing this analysis must never report.
@@ -170,9 +175,13 @@ mutable struct _Walk
     modules::Vector{Module}
     marked::Dict{Method,Union{Mark,Nothing}}
     truncated::Bool
+    # Work left to spend, SHARED with every subwalk. `visited` is per-branch by design — a
+    # candidate reached under another branch still has to be walked here — so it cannot also be
+    # the thing that bounds the total.
+    budget::Base.RefValue{Int}
 end
 
-function _Walk(maxdepth::Int, ignore, maxcandidates::Int=16)
+function _Walk(maxdepth::Int, ignore, maxcandidates::Int=16, maxwork::Int=20_000)
     return _Walk(
         Base.get_world_counter(),
         maxdepth,
@@ -184,11 +193,12 @@ function _Walk(maxdepth::Int, ignore, maxcandidates::Int=16)
         Module[],
         Dict{Method,Union{Mark,Nothing}}(),
         false,
+        Ref(maxwork),
     )
 end
 
 """
-    reach(f, types::Type{<:Tuple}; maxdepth = 32, ignore = Symbol[]) -> Reach
+    reach(f, types::Type{<:Tuple}; maxdepth = 32, maxwork = 20_000, ignore = Symbol[]) -> Reach
     reach(m::Module; kwargs...) -> Reach
 
 Report whether calling `f` with `types` can reach anything declared [`@experimental`](@ref) —
@@ -203,9 +213,15 @@ The module form folds every public entry point of `m` into one answer and report
 are affected in `affected_entries`: function-by-function does not scale to a package.
 
 `ignore` names marks to treat as absent, which answers "what would removing this mark change?"
-without removing it. `maxdepth` bounds the walk and `maxcandidates` bounds how many methods a
-single ambiguous call site is willing to check; hitting either bound is reported as `:unknown`,
-never as `:clean`.
+without removing it.
+
+Three bounds keep the walk finite, and hitting any of them is reported as `:unknown`, never as
+`:clean`. `maxdepth` bounds how far it goes, `maxcandidates` bounds how many methods a single
+ambiguous call site is willing to check, and `maxwork` bounds the total — because depth alone does
+not: 32 levels branching by 16 is not a finite amount of work, and the signatures a higher-order
+call generates need not repeat. Measured on 1.14.0-DEV, `[f(x) for x in xs]` did not return
+without `maxwork`, while the same call answers in milliseconds on 1.12. Raise it for a large entry
+point that comes back `:unknown` with a `:budget` in `unresolved`.
 
 # What it can and cannot resolve
 
@@ -233,10 +249,11 @@ function reach(
     @nospecialize(types::Type);
     maxdepth::Int=32,
     maxcandidates::Int=16,
+    maxwork::Int=20_000,
     ignore=Symbol[],
 )
     sig = Base.signature_type(f, types)
-    st = _Walk(maxdepth, ignore, maxcandidates)
+    st = _Walk(maxdepth, ignore, maxcandidates, maxwork)
     matches = _matching_methods(st, sig)
     (matches === nothing || isempty(matches)) && throw(
         ArgumentError(
@@ -252,8 +269,10 @@ end
 
 similar_entries() = NamedTuple{(:name, :verdict),Tuple{Symbol,Symbol}}[]
 
-function reach(m::Module; maxdepth::Int=32, maxcandidates::Int=16, ignore=Symbol[])
-    st = _Walk(maxdepth, ignore, maxcandidates)
+function reach(
+    m::Module; maxdepth::Int=32, maxcandidates::Int=16, maxwork::Int=20_000, ignore=Symbol[]
+)
+    st = _Walk(maxdepth, ignore, maxcandidates, maxwork)
     entries = similar_entries()
     for n in surface(m)
         isdefined(m, n) || continue
@@ -272,7 +291,7 @@ function reach(m::Module; maxdepth::Int=32, maxcandidates::Int=16, ignore=Symbol
         # A FRESH walk per entry point. Sharing one `visited` set across them would make the
         # second entry that reaches a marked definition through an already-walked callee look
         # clean — the mark is real, it was simply reported under the first entry's name.
-        own = _Walk(maxdepth, ignore, maxcandidates)
+        own = _Walk(maxdepth, ignore, maxcandidates, maxwork)
         for mm in ml
             mm.module === m || continue
             _enter!(own, mm, 0, Symbol[n])
@@ -325,7 +344,11 @@ the script uses; everything else is analysed as one thunk. So this **loads the s
 dependencies**, and a script whose top level has side effects will have them.
 """
 function reach_script(
-    path::AbstractString; maxdepth::Int=32, maxcandidates::Int=16, ignore=Symbol[]
+    path::AbstractString;
+    maxdepth::Int=32,
+    maxcandidates::Int=16,
+    maxwork::Int=20_000,
+    ignore=Symbol[],
 )
     isfile(path) || throw(ArgumentError("reach_script: no such file: $path"))
     ex = Meta.parseall(read(path, String); filename=path)
@@ -355,7 +378,7 @@ function reach_script(
     # "Detected access to binding … in a world prior to its definition world" — and says it will
     # be an error in a future version. The analysis reads globals out of the IR, which is what
     # makes this the one place in the package that reaches a binding younger than its caller.
-    r = Base.invokelatest(reach, thunk, Tuple{}; maxdepth, maxcandidates, ignore)
+    r = Base.invokelatest(reach, thunk, Tuple{}; maxdepth, maxcandidates, maxwork, ignore)
     return Reach(
         path,
         r.reached,
@@ -405,6 +428,21 @@ function _enter!(st::_Walk, match, depth::Int, path::Vector{Symbol})
         )
         return nothing
     end
+    # Depth bounds how FAR the walk goes, not how much of it there is: `maxdepth` levels each
+    # branching by `maxcandidates` is not a finite amount of work in any useful sense, and
+    # `visited` only prunes signatures that repeat. Measured on 1.14.0-DEV, `[f(x) for x in xs]`
+    # and `sum(map(f, xs))` produced new signatures faster than the depth limit could stop them
+    # and the call did not return; the same two answer in milliseconds on 1.12. So the walk also
+    # has a budget, and spends `:unknown` when it runs out — which is what `:unknown` is for.
+    if st.budget[] <= 0
+        st.truncated = true
+        push!(
+            st.unresolved,
+            Unresolved(mm.name, sig, :budget, mm.file, Int(mm.line), mm, Mark[]),
+        )
+        return nothing
+    end
+    st.budget[] -= 1
     sig in st.visited && return nothing
     push!(st.visited, sig)
     # The flag `@experimental` emits is this package's own code, and under `ignore` the walk goes
@@ -619,6 +657,7 @@ function _subwalk(st::_Walk)
         Module[],
         st.marked,
         false,
+        st.budget,
     )
 end
 
