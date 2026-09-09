@@ -92,7 +92,12 @@ What [`reach`](@ref) found.
 | `through_modules` | every module the walk went through |
 | `affected_entries` | for a module or script entry: the public entry points that are not clean |
 | `visited` | how many distinct signatures were inferred |
-| `truncated` | whether a depth limit stopped the walk |
+| `truncated` | whether a bound stopped the walk — `maxdepth` or `maxwork` |
+
+`truncated` is not cosmetic: when it is `true`, `reached` is a **lower bound**. Measured on a
+module with twelve marked definitions behind one loop, budgets between the two extremes report
+`:depends` with one, two, … of them found and the rest never walked to. `:depends` is still the
+right verdict, but "fix the one it named" is not the same as "fix everything it depends on".
 
 There is deliberately **no** `verdict` field. A stored verdict makes `:clean` with a non-empty
 `unresolved` representable, and that state is the single thing this analysis must never report.
