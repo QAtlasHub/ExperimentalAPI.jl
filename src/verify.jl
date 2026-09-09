@@ -198,10 +198,24 @@ function _sibling_spans(x, outer_end::Int)
     return out
 end
 
+# `"docstring"` above a definition parses into `Core.@doc "…" <definition>`, one statement whose
+# start line is the DOCSTRING's. Nothing then starts on the definition's own line, which is what
+# the mark recorded.
+function _is_doc_call(st)
+    return st isa Expr &&
+           st.head === :macrocall &&
+           (st.args[1] === GlobalRef(Core, Symbol("@doc")) || st.args[1] === Symbol("@doc"))
+end
+
 function _find_span(x, line::Int, outer_end::Int)
     (x isa Expr) || return nothing
     for (a, b, st) in _sibling_spans(x, outer_end)
         a == line && return (a, b)
+        # The documented-and-marked definition is the shape this package asks for — `audit` wants
+        # a docstring on every public name AND a mark on the unfinished ones — and it was the one
+        # shape whose coverage came back `missing`, because no sibling started on `mk.line`. The
+        # span is still this sibling's; only where it starts moved.
+        (_is_doc_call(st) && a < line <= b) && return (line, b)
         (a <= line <= b) || continue
         for body in _containers(st)
             r = _find_span(body, line, b)

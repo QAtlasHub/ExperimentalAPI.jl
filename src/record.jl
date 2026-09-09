@@ -523,6 +523,22 @@ make.
 """
 attribute(data) = attribute(timing_backend(), data)
 
+# The mistake this package sets its users up for: `record` hands back a `Record`, `attribute` is
+# the neighbouring verb, and calling `attribute(rec)` failed inside `Profile` with
+# `MethodError: no method matching getdict(::Record)` — a message naming neither argument nor
+# function the caller wrote. A `Record` already carries per-hit `inclusive`/`exclusive`; the raw
+# buffer is the input here.
+function attribute(rec::Record)
+    return throw(
+        ArgumentError(
+            "attribute: expected a profile buffer, got a `Record`. A `Record` already carries " *
+            "the attribution — read `inclusive`/`exclusive` off its hits, or call " *
+            "`record(f; timing = true)` to collect them. `attribute` is for a buffer somebody " *
+            "else profiled: `attribute(Profile.fetch())`.",
+        ),
+    )
+end
+
 function attribute(::NoTiming, data)
     return throw(
         ArgumentError(
@@ -608,6 +624,15 @@ Read back a record written by [`write_record`](@ref).
 The `method` field of every [`Hit`](@ref) comes back `nothing`, and so does the record's `value`:
 neither a `Method` nor a run's result is a thing a file can carry, and reconstructing one would
 mean claiming the code in this process is the code that produced the record.
+
+!!! warning "`mod` falls back to `Main` when the module is not loaded here"
+    The file carries a module's **name**. If this process has that module the field comes back
+    pointing at it; if it does not — which is the ordinary case when shards are merged on a
+    machine that never loaded the package — `mod` is `Main`, and a report then reads
+    `Main.energy` for a name that does not exist in `Main`. Read `mod` from a merged record as
+    "where it was, if that is here", never as an address. `Hit.mod` is a `Module` and a file
+    cannot carry one, which is why this is stated rather than fixed; [`record`](@ref) and its
+    file format are declared `@experimental` for this kind of reason.
 """
 function read_record(path::AbstractString)
     d = TOML.parsefile(path)
