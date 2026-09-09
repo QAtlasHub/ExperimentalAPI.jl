@@ -19,17 +19,27 @@ using ExperimentalAPI
 energy(0.5)
 ```
 
-```console
-$ julia sweep.jl
-… your output …
-┌ ExperimentalAPI: this run entered 1 experimental definition
-│   MyModel.energy — convergence not established below β ≈ 0.1
-└ set ENV["EXPERIMENTALAPI_SUMMARY"] = "0" before `using` to silence this
+Now run a program that uses it — `examples/sweep.jl` in this repository — and read what it says on
+its way out. The block below is not a transcript: it runs that script as its own process during the
+documentation build and prints what came back on `stderr`.
+
+```@example frontpage
+script = joinpath(pkgdir(ExperimentalAPI), "examples", "sweep.jl")
+err = IOBuffer()
+run(
+    pipeline(
+        `$(Base.julia_cmd()) --startup-file=no --project=$(Base.active_project()) $script`;
+        stdout=devnull, stderr=err,
+    ),
+)
+print(String(take!(err)))
 ```
 
 Nobody asked for that summary. It is on by default, it carries the **reason** rather than just the
 symbol, and a marked definition the run never entered is *absent* — not reported with a count of
-zero. The same answer is available programmatically through [`entered`](@ref).
+zero. It goes to `stderr`, so `julia sweep.jl > result.dat` keeps the data clean and still puts the
+notice in front of whoever ran it. The same answer is available programmatically through
+[`entered`](@ref), and the [walkthrough](@ref "A walkthrough, run rather than typed") asks all five questions against one running package.
 
 ## Five questions, and the first is the reason to have this
 

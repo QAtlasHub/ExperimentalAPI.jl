@@ -1,4 +1,8 @@
 docs/build/
+# Generated from `examples/walkthrough.jl` by Literate at docs-build time. Committing it would
+# put a second, drifting copy of the outputs in the repository — the exact failure the page is
+# built to avoid.
+docs/src/walkthrough.md
 Manifest.toml
 # `flush_coverage` writes these next to the source it measured, so a coverage-enabled run
 # of the suite leaves them in `src/`.
