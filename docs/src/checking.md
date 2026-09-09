@@ -23,13 +23,23 @@ This is the part the rest of the package exists for.
 A mark says the shape is unsettled. That is never a reason to say nothing about what the name
 does, so a marked name with no prose is a finding exactly as an unmarked one is.
 
-```julia
-julia> ExperimentalAPI.audit(Archeion)
-Public surface of Archeion — 36 names
-  documented      33
-  experimental     0
-  undocumented     3   ← no docstring
-     FTPSTransport, pull_file, push_dir
+```@setup checking
+using ExperimentalAPI
+module Archeion
+using ExperimentalAPI
+public ingest, fetch_record, FTPSTransport, pull_file, push_dir
+"Ingest a document."
+ingest(x) = x
+"Fetch one record."
+fetch_record(x) = x
+struct FTPSTransport end
+pull_file(t::FTPSTransport, p) = p
+push_dir(t::FTPSTransport, p) = p
+end
+```
+
+```@repl checking
+ExperimentalAPI.audit(Archeion)
 ```
 
 The list is never truncated. A coverage report that elides its tail reads as if the tail were
@@ -110,15 +120,28 @@ see exactly which names it would have to argue about. Empty means the two agree.
 
 ## The method-level half
 
-```julia
-julia> ExperimentalAPI.audit(Downstream).contributed_methods
-4-element Vector{Method}:
- fetch_value(::Ising, ::Energy) …
- ⋮
+```@setup checking2
+using ExperimentalAPI
+module Upstream
+struct Ising end
+struct Energy end
+fetch_value(m, q) = 0.0
+end
+module Downstream
+using ExperimentalAPI
+using ..Upstream: Upstream, Ising, Energy
+public Widget
+struct Widget end
+"Documented, on somebody else's generic."
+Upstream.fetch_value(::Ising, ::Energy) = 1.0
+@experimental "extrapolated; no reference value" Upstream.fetch_value(::Ising, ::Int) = 2.0
+Base.show(io::IO, ::Widget) = print(io, "<widget>")
+end
+```
 
-julia> ExperimentalAPI.unaccounted_methods(Downstream)      # neither a docstring nor a mark
-2-element Vector{Method}:
- ⋮
+```@repl checking2
+ExperimentalAPI.audit(Downstream).contributed_methods
+ExperimentalAPI.unaccounted_methods(Downstream)   # neither a docstring nor a mark
 ```
 
 Docstrings are keyed by signature, so [`isdocumented`](@ref)`(::Method)` is a real question and
@@ -138,14 +161,27 @@ under the ones Julia adds next. `require_methods = :all` widens it.
 The mark records where it was written, and `--code-coverage` records a count per line. Joining the
 two answers the worst case a marked definition can be in:
 
-```julia
-julia> ExperimentalAPI.unverified(MyPackage)          # marked AND never executed by the suite
-1-element Vector{ExperimentalAPI.Mark}:
- ExperimentalAPI.Mark(MyPackage.never_called, "shipped without ever being called")
-
-julia> ExperimentalAPI.coverage(MyPackage, :half_exercised)
-0.6
+```@setup checking3
+using ExperimentalAPI
+module MyPackage
+using ExperimentalAPI
+public exercised, never_called
+"Run by the suite."
+@experimental "reference value not cross-checked" exercised(x) = x + 1
+"Never run."
+@experimental "shipped without ever being called" never_called(x) = x * 0
+end
+MyPackage.exercised(1)
 ```
+
+```@repl checking3
+ExperimentalAPI.unverified(MyPackage)     # marked AND never entered by this process
+ExperimentalAPI.coverage(MyPackage, :exercised)
+```
+
+`unverified` reads the probe, which is exact and needs no coverage run. `coverage` is the partial
+fraction and answers `missing` here, because a documentation build has no `--code-coverage`
+counters — which is the next paragraph's point, shown rather than described.
 
 [`coverage`](@ref) answers `missing`, never `0.0`, when the run has no coverage data: a run
 without `--code-coverage` has nothing to say, and reporting zero would flag every marked

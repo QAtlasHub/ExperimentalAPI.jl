@@ -5,6 +5,19 @@ DocTestSetup = quote
 end
 ```
 
+```@setup observing
+using ExperimentalAPI
+module MyModel
+using ExperimentalAPI
+public energy, step, sweep, simulate
+@experimental "convergence not established below β ≈ 0.1" energy(β::Float64) = -log(2cosh(β)) / β
+step(β::Float64) = energy(β) + tanh(β)
+sweep(βs::Vector{Float64}) = (t = 0.0; for β in βs; t += step(β); end; t)
+simulate(βs::Vector{Float64}; steps::Int = 1) = (t = 0.0; for _ in 1:steps; t += sweep(βs); end; t)
+end
+βs = collect(0.05:0.05:2.0)
+```
+
 # Observing
 
 A docstring can say a name is unfinished. It cannot tell you that *this run* went through it.
@@ -44,16 +57,14 @@ Three properties, each of them a decision:
 
 [`entered`](@ref) returns the same thing the summary prints, as a `Vector{`[`Entry`](@ref)`}`:
 
-```julia
-julia> ExperimentalAPI.entered()
-1-element Vector{ExperimentalAPI.Entry}:
- ExperimentalAPI.Entry(Main.energy, "convergence not established below β ≈ 0.1")
+```@repl observing
+MyModel.energy(0.5)
+ExperimentalAPI.entered(MyModel)
 ```
 
-The display above is a transcript rather than a doctest on purpose: `Entry` prints its module, and
-Documenter evaluates doctests in a sandbox whose module does not print as `Main`, so a doctest here
-would show a line no reader ever sees at their own REPL. The fields it is read for do not depend on
-where it ran, so those are checked:
+Asked about a module rather than about the whole process, because the process-wide answer includes
+every marked package loaded — on this page, the fixtures the documentation built. The fields it is
+read for do not depend on where it ran, and those are checked as a doctest:
 
 ```jldoctest
 julia> using ExperimentalAPI
@@ -116,20 +127,20 @@ table above.
 
 ## Recording: counts, paths and time
 
-```julia
-r = ExperimentalAPI.record() do
-    simulate(model; steps = 10_000)
+```@example observing
+r = ExperimentalAPI.record(; paths = false) do
+    MyModel.simulate(βs; steps = 500)
 end
+nothing # hide
 ```
 
-```julia
-julia> r
-Record — 1 marked definition entered in 0.42s
-  MyModel.energy  ×10000 — convergence not established below β ≈ 0.1
-     inclusive 0.31s   exclusive 0.28s
-     via record → sweep → step → energy
-  recorder overhead ≈ 4.1%
+```@example observing
+r
 ```
+
+`paths = false` here because a captured path is the whole call stack, and on this page that starts
+at `_start` and runs through `makedocs`. The timings are `missing`: a documentation build does not
+load `Profile`, and `record` reports what it measured rather than a zero.
 
 [`record`](@ref) returns a `Vector`-like of [`Hit`](@ref), so `isempty(r)` and `r[1].count` read
 the way they look — with the properties an empty vector could not carry:
@@ -147,14 +158,14 @@ the way they look — with the properties an empty vector could not carry:
 [`@entered`](@ref) is the same question asked about an expression, and it knows two things a
 closure cannot — the source text of the call and the line it is written on:
 
-```julia
-julia> ExperimentalAPI.@entered sweep(model; βs = 0.05:0.05:2.0)
-┌ @entered sweep(model; βs = 0.05:0.05:2.0)   at sweep.jl:42
-│   MyPkg.correlator  ×  500 — edge cases at zero separation untested
-│   MyPkg.energy      ×10000 — convergence not established below β ≈ 0.1
-└ 15 of 17 observable marked definitions were not entered
-0.42713…
+```@example observing
+report = IOBuffer()
+value = ExperimentalAPI.@entered report MyModel.sweep(βs)
+print(String(take!(report)))
 ```
+
+The footer counts every observable marked definition **loaded in the process**, not only the ones
+in your package.
 
 It returns the value of the expression, so it drops into existing code the way `@time` does — with
 one divergence `@time` does not have, since `record` takes a function and the expression therefore
@@ -162,10 +173,9 @@ runs inside a closure: a `return` inside it returns from the closure, and `@ente
 `y` inside the closure. Write `y = @entered f(x)`. The last line is what makes a clean answer mean
 anything:
 
-```julia
-julia> ExperimentalAPI.@entered publish(result)
-┌ @entered publish(result)   at sweep.jl:57
-└ entered nothing marked — 17 observable marked definitions were loaded
+```@example observing
+ExperimentalAPI.@entered report round(1.0; digits = 2)
+print(String(take!(report)))
 ```
 
 "Entered nothing" and "nothing is marked anywhere" are different states, and a package that has
