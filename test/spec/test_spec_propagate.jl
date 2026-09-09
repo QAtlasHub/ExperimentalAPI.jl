@@ -218,26 +218,60 @@ end
 
 # ── termination ──────────────────────────────────────────────────────────────────────────────
 
-@testset "a generator argument is answered, not thrown out of" begin
+@testset "a higher-order argument is answered, not thrown out of and not hung on" begin
     # `sum(f(x) for x in xs)` lowers to a `Base.MappingRF` whose two fields are both singletons,
     # which makes the STRUCT a singleton — so `w.instance` exists for a callable that is neither a
     # `Function` nor a `Type`. `nameof` has no method for that, and the analysis died with a
     # `MethodError` instead of returning one of its three verdicts. Measured on the shape this
     # package's own `@entered` docstring uses as its worked example.
     #
-    # A throw is not a fourth verdict. `:unknown` is what "could not resolve this" is for.
-    for (f, want) in (
-        (Chain.gen_bad, :depends),
-        (Chain.gen_good, :clean),
-        (Chain.comp_bad, :depends),
-        (Chain.map_bad, :depends),
-        (Chain.loop_good, :clean),
-    )
-        @testset "$(nameof(f))" begin
-            r = ExperimentalAPI.reach(f, Tuple{Vector{Float64}})
-            @test ExperimentalAPI.verdict(r) === want
+    # Removing the throw then exposed the second half: on 1.14.0-DEV `[f(x) for x in xs]` and
+    # `sum(map(f, xs))` generated new signatures faster than `maxdepth` could stop them and the
+    # call never returned, while both answer in milliseconds on 1.12. `maxwork` bounds the total.
+    #
+    # A throw is not a fourth verdict and neither is a hang.
+    for f in (Chain.gen_bad, Chain.gen_good, Chain.comp_bad, Chain.map_bad, Chain.loop_good)
+        @testset "$(nameof(f)) answers" begin
+            @test ExperimentalAPI.verdict(
+                ExperimentalAPI.reach(f, Tuple{Vector{Float64}})
+            ) in (:depends, :clean, :unknown)
         end
     end
+end
+
+@testset "a higher-order caller that reaches a mark is never reported clean" begin
+    # The safety property, stated separately from the exact verdict because the exact verdict is
+    # version-dependent and this is not. Measured 2026-09-09: `[unstable(x) for x in xs]` and
+    # `sum(map(unstable, xs))` are `:depends` on 1.12.2 and `:unknown` on 1.14.0-DEV, because the
+    # budget runs out first there. `:unknown` is a weaker answer; `:clean` would be a false one.
+    for f in (Chain.gen_bad, Chain.comp_bad, Chain.map_bad)
+        @testset "$(nameof(f)) is not clean" begin
+            @test ExperimentalAPI.verdict(
+                ExperimentalAPI.reach(f, Tuple{Vector{Float64}})
+            ) !== :clean
+        end
+    end
+    # Control: the same shapes with nothing marked behind them DO come back clean, so the
+    # assertion above is not satisfied by an analysis that never says `:clean` at all.
+    for f in (Chain.gen_good, Chain.loop_good)
+        @testset "$(nameof(f)) is clean" begin
+            @test ExperimentalAPI.verdict(
+                ExperimentalAPI.reach(f, Tuple{Vector{Float64}})
+            ) === :clean
+        end
+    end
+end
+
+@testset "the budget is a knob, and spending it says so rather than guessing" begin
+    # `maxwork` has to be reachable from the outside: an entry point that comes back `:unknown`
+    # with `:budget` in `unresolved` is a different situation from one that is genuinely dynamic,
+    # and the caller is the only one who can decide to pay for more.
+    r = ExperimentalAPI.reach(Chain.top_bad, Tuple{Float64}; maxwork=1)
+    @test ExperimentalAPI.verdict(r) === :unknown
+    @test any(u -> u.why === :budget, r.unresolved)
+    # Control: the same call with the default budget resolves, so `maxwork` is what did it.
+    @test ExperimentalAPI.verdict(ExperimentalAPI.reach(Chain.top_bad, Tuple{Float64})) ===
+        :depends
 end
 
 @testset "self-recursion terminates and still finds the mark" begin
