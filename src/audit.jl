@@ -195,7 +195,11 @@ function own_methods(m::Module)
             mm.module === m && !(mm in seen) && (push!(seen, mm); push!(out, mm))
         end
     end
-    return sort!(out; by=mm -> (string(mm.name), string(mm.sig)))
+    # The key is built ONCE per method, not once per comparison. `sort!(…; by = f)` calls `f` on
+    # both sides of every comparison, and `string(mm.sig)` is not cheap: measured on this
+    # package's own 301 methods, the sort was 0.601s while building all 301 keys was 0.039s. That
+    # one line was 80% of `audit`, which is called once per module in every surface check.
+    return out[sortperm([(string(mm.name), string(mm.sig)) for mm in out])]
 end
 
 function _generic_candidates(m::Module)
