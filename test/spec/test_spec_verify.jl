@@ -26,6 +26,9 @@ end
 
 @experimental "shipped without ever being called" never_exercised(x) = x * 0
 
+"Documented and marked — the shape `audit` asks for, and the one whose coverage came back `missing`."
+@experimental "documented, and still unfinished" documented_and_marked(x) = x + 2
+
 end # module Covered
 
 # Deliberately partial: a fully exercised fixture cannot tell a working join from one that
@@ -33,8 +36,26 @@ end # module Covered
 @testset "the fixture is exercised only partly, on purpose" begin
     @test Covered.exercised(1) == 2
     @test Covered.half_exercised(1) == 1
+    @test Covered.documented_and_marked(1) == 3
     # `half_exercised(-1)` is NOT called
     # `never_exercised` is NOT called
+end
+
+@testset "a docstring above the mark does not hide the coverage" begin
+    # Measured: entered once each in one process, bare reported 1/1 and documented 0/0 `missing`,
+    # because the docstring makes the pair one statement starting on the docstring's line. The
+    # documented-and-marked shape is the one `audit` asks for.
+    vs = Dict(v.mark.name => v for v in ExperimentalAPI.verification(Covered))
+    doc = vs[:documented_and_marked]
+    bare = vs[:exercised]
+    if bare.fraction === missing
+        # No coverage in this run at all — then BOTH must say so, which is the claim either way.
+        @test doc.fraction === missing
+    else
+        @test doc.fraction !== missing
+        @test doc.fraction == bare.fraction == 1.0
+        @test doc.total > 0
+    end
 end
 
 @testset "marks carry the location a coverage file is keyed by" begin
@@ -130,5 +151,5 @@ end
     @test length(vs) == length(ExperimentalAPI.experimental(Covered))
     @test all(v -> v isa ExperimentalAPI.Verification, vs)
     @test Set(v.mark.name for v in vs) ==
-        Set([:exercised, :half_exercised, :never_exercised])
+        Set([:exercised, :half_exercised, :never_exercised, :documented_and_marked])
 end

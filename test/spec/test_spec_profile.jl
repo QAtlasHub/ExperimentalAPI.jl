@@ -632,6 +632,55 @@ end
     @test ExperimentalAPI.assert_clean(() -> 1 + 1)
 end
 
+@testset "attribute refuses a Record by name instead of failing inside Profile" begin
+    # `attribute` takes a profile buffer. Given the `Record` next door it failed inside `Profile`
+    # with `no method matching getdict(::Record)`.
+    rec = ExperimentalAPI.record(() -> Sim.driver(M, 3); paths=false, timing=false)
+    e = try
+        ExperimentalAPI.attribute(rec)
+        nothing
+    catch err
+        err
+    end
+    @test e isa ArgumentError
+    msg = sprint(showerror, e)
+    @test occursin("attribute", msg)              # the verb they wrote
+    @test occursin("Record", msg)                 # what they passed
+    @test occursin("Profile.fetch()", msg)        # …and what to pass instead
+    @test !occursin("getdict", msg)               # not an internal of somebody else's package
+end
+
+@testset "a record read where its module is not loaded says Main, and that is stated" begin
+    # A file carries a module's name; `Hit.mod` is a `Module`. Present here it resolves, absent it
+    # falls back to `Main` — so a merged report reads `Main.energy` for a name not in `Main`.
+    dir = mktempdir()
+    p = joinpath(dir, "rec.toml")
+    rec = ExperimentalAPI.record(() -> Sim.driver(M, 3); paths=false, timing=false)
+    ExperimentalAPI.write_record(p, rec)
+
+    here = ExperimentalAPI.read_record(p)
+    @test only(here).mod === Sim                      # present: resolved
+
+    # Absent: read it in a process that never defined `Sim`.
+    probe = joinpath(dir, "probe.jl")
+    write(
+        probe,
+        """
+        using ExperimentalAPI
+        r = ExperimentalAPI.read_record(ARGS[1])
+        println(only(r).mod, " ", only(r).name, " ", only(r).count)
+        """,
+    )
+    out = read(
+        `$(Base.julia_cmd()) --startup-file=no --project=$(Base.active_project()) $probe $p`,
+        String,
+    )
+    parts = split(strip(out))
+    @test parts[1] == "Main"
+    @test parts[2] == String(only(rec).name)
+    @test parts[3] == string(only(rec).count)
+end
+
 @testset "the assertion fails, naming the mark, when the run is not clean" begin
     # Control: a gate that cannot be shown to fire is not a gate.
     @test !ExperimentalAPI.assert_clean(() -> Sim.driver(M, 10); throw=false)

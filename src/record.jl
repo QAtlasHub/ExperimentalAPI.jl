@@ -523,6 +523,18 @@ make.
 """
 attribute(data) = attribute(timing_backend(), data)
 
+# Without this the call failed inside `Profile` with `no method matching getdict(::Record)`.
+function attribute(rec::Record)
+    return throw(
+        ArgumentError(
+            "attribute: expected a profile buffer, got a `Record`. A `Record` already carries " *
+            "the attribution — read `inclusive`/`exclusive` off its hits, or call " *
+            "`record(f; timing = true)` to collect them. `attribute` is for a buffer somebody " *
+            "else profiled: `attribute(Profile.fetch())`.",
+        ),
+    )
+end
+
 function attribute(::NoTiming, data)
     return throw(
         ArgumentError(
@@ -608,6 +620,11 @@ Read back a record written by [`write_record`](@ref).
 The `method` field of every [`Hit`](@ref) comes back `nothing`, and so does the record's `value`:
 neither a `Method` nor a run's result is a thing a file can carry, and reconstructing one would
 mean claiming the code in this process is the code that produced the record.
+
+!!! warning "`mod` falls back to `Main` when the module is not loaded here"
+    The file carries a module's **name** and `Hit.mod` is a `Module`. Absent from this process —
+    the ordinary case when shards are merged elsewhere — `mod` is `Main`, and the report reads
+    `Main.energy` for a name that is not in `Main`.
 """
 function read_record(path::AbstractString)
     d = TOML.parsefile(path)
