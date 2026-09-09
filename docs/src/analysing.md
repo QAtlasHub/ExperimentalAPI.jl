@@ -7,15 +7,22 @@ CurrentModule = ExperimentalAPI
 [`entered`](@ref) and [`record`](@ref) say what a run *did*. [`reach`](@ref) says what a caller
 *could* do — before running it, and including through code that never names the marked thing.
 
-```julia
-julia> r = ExperimentalAPI.reach(analyse, Tuple{Model,Float64});
+```@setup analysing
+using ExperimentalAPI
+module MyModel
+using ExperimentalAPI
+public energy, inner, sweep, analyse
+@experimental "convergence not established below β ≈ 0.1" energy(β::Float64) = -log(2cosh(β)) / β
+inner(β::Float64) = energy(β) * 2
+sweep(βs::Vector{Float64}) = (t = 0.0; for β in βs; t += inner(β); end; t)
+analyse(βs::Vector{Float64}) = round(sweep(βs); digits = 4)
+end
+```
 
-julia> ExperimentalAPI.verdict(r)
-:depends
-
-julia> r.reached
-1-element Vector{ExperimentalAPI.Reached}:
- ExperimentalAPI.Reached(MyModel.energy via analyse → sweep → inner → energy)
+```@repl analysing
+r = ExperimentalAPI.reach(MyModel.analyse, Tuple{Vector{Float64}});
+ExperimentalAPI.verdict(r)
+r.reached
 ```
 
 The model is Lean's `sorry`: a proof that uses one is not a proof, however many layers down it

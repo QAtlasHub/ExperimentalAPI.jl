@@ -37,13 +37,22 @@ Why a name is not settled is knowledge only the author has. A reader can see tha
 odd; they cannot see that it is odd *because* a refactor upstream has not landed. So the reason
 is required, and the mark carries it everywhere the name goes:
 
-```julia
-julia> ExperimentalAPI.mark(Archeion, :ingest)
-Archeion.ingest — experimental
-  reason:   signature will be wrapped once the write-back refactor settles
-  since:    v0.1.4
-  tracking: https://github.com/QAtlasHub/Archeion.jl/issues/12
-  declared: /…/Archeion.jl/src/ingest.jl:153
+```@setup declaring
+using ExperimentalAPI
+module Archeion
+using ExperimentalAPI
+public ingest
+@experimental(
+    "signature will be wrapped once the write-back refactor settles",
+    since = v"0.1.4",
+    tracking = "https://example.invalid/issues/12",
+    ingest(config; doc = nothing) = config,
+)
+end
+```
+
+```@repl declaring
+ExperimentalAPI.mark(Archeion, :ingest)
 ```
 
 `since` and `tracking` are optional and go between the reason and the subject:
@@ -62,14 +71,25 @@ shape they need.
 ## What it attaches to
 
 `function`, short-form `f(x) = …`, `struct`, `mutable struct`, `abstract type`,
-`primitive type`, `macro` (recorded as `Symbol("@name")`), `const`, and plain assignment.
+`primitive type`, `macro` (recorded as `Symbol("@name")`), `const`, plain assignment, a definition
+wrapped in `@inline` and its neighbours, and a method on **another module's** generic —
+`Base.show(io, ::Widget) = …`. That last one is not on `names(m)` and never can be, so it is
+reported by [`contributed_methods`](@ref) rather than by the name audit.
 
 Anything else is **refused with a message naming the alternative**, never guessed at:
 
-```julia
-julia> @experimental "why" Base.sum(x::Int) = x
-ERROR: ArgumentError: @experimental: `Base.sum` defines a name owned by another module,
-which is not part of this module's public surface
+```@example declaring
+try
+    @eval module Refused
+    using ExperimentalAPI
+    module Sub
+    g(x) = x
+    end
+    @experimental "why" Sub.g
+    end
+catch e
+    showerror(stdout, e isa LoadError ? e.error : e)
+end
 ```
 
 The refused cases and why:
@@ -77,8 +97,9 @@ The refused cases and why:
 | | |
 |---|---|
 | `module M … end` | Julia requires it as a direct top-level statement, so it cannot be wrapped — use the name-list form |
-| `Base.foo(x) = …` | adds a method to a name this module does not own; it is not on your surface |
-| `@somemacro …` | the macro cannot know which name the expansion defines — name it explicitly |
+| a bare `Sub.g` | names somebody else's generic without saying **which** method — mark the definition |
+| `begin f(x)=x; g(x)=x end` | two names, one mark; marking the first and dropping the second is a covenant that omits a definition |
+| `@somemacro …` | outside the annotating allowlist the macro cannot know which name the expansion defines |
 
 Guessing in any of these cases would produce a mark on the wrong symbol, which is worse than no
 mark: `audit` would then report it as `dangling` and the author would be debugging this package
@@ -109,17 +130,16 @@ A mark says nothing about visibility. A name still has to be `export`ed or decla
 be part of the surface, and a mark on a name that is neither promises nothing to anyone —
 [`audit`](@ref) reports it as `dangling`:
 
-```julia
+```@example declaring
 module M
 using ExperimentalAPI
 @experimental "not settled" helper(x) = x   # never exported, never public
 end
+nothing # hide
 ```
 
-```julia
-julia> ExperimentalAPI.audit(M).dangling
-1-element Vector{Symbol}:
- :helper
+```@repl declaring
+ExperimentalAPI.audit(M).dangling
 ```
 
 That check needs no reference to be right. The module is disagreeing with itself.

@@ -9,10 +9,21 @@ and no idea which of them anybody meant.
 
 ## Start by looking
 
-```julia
-julia> using MyPackage, ExperimentalAPI
+```@setup adopting
+using ExperimentalAPI
+module MyPackage
+using ExperimentalAPI
+public settled, unfinished, undescribed
+"Settled and documented."
+settled(x) = x
+"Documented, and not finished."
+@experimental "the tolerance is a guess" unfinished(x) = x
+undescribed(x) = x
+end
+```
 
-julia> ExperimentalAPI.audit(MyPackage)
+```@repl adopting
+ExperimentalAPI.audit(MyPackage)
 ```
 
 Two numbers matter. `undocumented` is the backlog. `dangling` should be zero on day one, because
