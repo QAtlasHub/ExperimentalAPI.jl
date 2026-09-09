@@ -1,9 +1,8 @@
 # What one `@experimental` declaration records, where it is stored, and the macro that writes it.
 #
-# Storage is a `const` vector inside the MARKED module: a registry here would be populated during
-# the marked package's precompilation, and nothing written into a third module then survives into
-# its cache image. `Docs.META` is per-module for the same reason. Pinned by
-# `test/test_precompile.jl`.
+# Storage is a `const` vector inside the MARKED module: a registry here would be written during
+# that package's precompilation and would not survive into its cache image. `Docs.META` is
+# per-module for the same reason.
 
 """
     Mark
@@ -150,10 +149,8 @@ end
 const MARKS_BINDING = :__EXPERIMENTAL_API_MARKS__
 const SUPERSEDED_BINDING = :__EXPERIMENTAL_API_SUPERSEDED__
 
-# Created by code the macro emits into the marked module, not by `Core.eval` from here: Julia
-# 1.12 rejects reading a binding created earlier in the same top-level statement, which is what a
-# `Core.eval`-then-`getglobal` helper does. The emitted form puts the `const` and the `push!` in
-# separate statements, so the world age has advanced in between.
+# Emitted into the marked module, not `Core.eval`ed from here: 1.12 rejects reading a binding
+# created in the same top-level statement. The `const` and the `push!` are separate statements.
 function _registry_of(m::Module)
     v = getglobal(m, MARKS_BINDING)
     v isa Vector{Mark} || throw(
@@ -167,10 +164,9 @@ end
 
 _has_registry(m::Module) = isdefined(m, MARKS_BINDING)
 
-# The superseded log is created on the first replacement rather than emitted by the macro: most
-# modules never supersede a mark, and an empty binding in every marked module would be noise in
-# `names(m; all=true)`. `Core.eval` is safe here because the value is used through the return
-# value, never by reading the binding back in the same world age.
+# Created on the first replacement, not emitted by the macro: most modules never supersede a mark
+# and an empty binding would be noise in `names(m; all=true)`. `Core.eval` is safe because the
+# value is used through the return, never read back in the same world age.
 function _superseded_registry!(m::Module)
     isdefined(m, SUPERSEDED_BINDING) && return getglobal(m, SUPERSEDED_BINDING)
     return Core.eval(m, Expr(:const, Expr(:(=), SUPERSEDED_BINDING, Mark[])))
@@ -358,12 +354,10 @@ macro experimental(args...)
 
     src = __source__
     marks = esc(MARKS_BINDING)
-    # The `const` must land in its own top-level statement: the `_mark!` calls below read that
-    # binding, and Julia 1.12 forbids reading one created in the same world age.
-    #
-    # Built with `Expr` so no `LineNumberNode` from this file reaches the expansion. `const` in
-    # local scope is a lowering error this macro cannot catch, so the only lever is where the
-    # error points, and it must point at the caller. Pinned in `test_spec_forms.jl`.
+    # The `const` lands in its own top-level statement: the `_mark!` calls below read it, and 1.12
+    # forbids reading a binding created in the same world age. Built with `Expr` so no
+    # `LineNumberNode` from this file reaches the expansion and the lowering error points at the
+    # caller.
     init = Expr(
         :if,
         :(!$(isdefined)($__module__, $(QuoteNode(MARKS_BINDING)))),
@@ -517,14 +511,12 @@ struct _Subject
     includes_constructors::Bool
 end
 
-# Macros known to hand their definition through unchanged. An allowlist rather than "unwrap the
-# last argument of any macrocall": `@deprecate old new` also ends in something name-shaped, and
-# marking the wrong symbol silently is the failure this package exists to remove.
+# An allowlist, not "unwrap the last argument of any macrocall": `@deprecate old new` also ends in
+# something name-shaped.
 #
-# Split by whether the body underneath is still a body. `@inline` and its neighbours annotate a
-# definition and leave the body alone, so the probe can ride inside and the definition is
-# observed. `@generated`'s body returns an expression — a probe there would be generated rather
-# than run — and `Base.@kwdef` wraps a struct, which has no body at all.
+# Split by whether the body underneath is still a body. `@inline` and its neighbours leave it
+# alone, so the probe rides inside. `@generated`'s body returns an expression and `Base.@kwdef`
+# wraps a struct.
 const _ANNOTATING_MACROS = (
     Symbol("@inline"),
     Symbol("@noinline"),

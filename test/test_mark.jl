@@ -1,8 +1,5 @@
-# What `@experimental` accepts, what it refuses, and what the refusal says.
-#
-# Each accepted form gets its own module, because the thing under test is a top-level effect on
-# the enclosing module — a `@testset` body is a function, and a mark written there would land
-# somewhere no query looks.
+# What `@experimental` accepts, what it refuses, and what the refusal says. Each form gets its own
+# module: the effect under test is top-level, and a `@testset` body is a function.
 
 using ExperimentalAPI:
     ExperimentalAPI, @experimental, Mark, experimental, isexperimental, mark

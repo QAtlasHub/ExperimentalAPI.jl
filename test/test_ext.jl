@@ -1,9 +1,6 @@
-# `test_surface` is the reason the rest of the package exists, so the thing to establish is not
-# that it passes on a clean module — it is that it FAILS on a dirty one, and fails naming the
-# right symbol. A check that cannot be shown to fail has not been shown to check anything.
-#
-# `Recorder` collects results instead of throwing, which is what lets a passing suite contain a
-# deliberate failure.
+# The thing to establish is not that `test_surface` passes on a clean module — it is that it FAILS
+# on a dirty one, naming the right symbol. `Recorder` collects results instead of throwing, which
+# is what lets a passing suite contain a deliberate failure.
 
 using ExperimentalAPI: audit, test_surface
 using Test: Test

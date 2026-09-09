@@ -1,13 +1,9 @@
-# How well a marked definition is exercised by the tests.
+# How well a marked definition is exercised by the tests. No new machinery: the mark carries the
+# file and line, `--code-coverage` writes a count per line, and joining them answers the worst case
+# — unvalidated code its own suite never runs.
 #
-# No new machinery: the mark already carries the file and line its definition starts at, and
-# `--code-coverage` already writes a count per line. Joining the two answers the worst case a
-# marked definition can be in — unvalidated code that its own suite never runs — and it answers it
-# without anyone writing another list.
-#
-# Coverage counts are flushed from the running process rather than read from the `.cov` files
-# Julia writes at exit, because a test that has to wait for the process to end cannot assert
-# anything.
+# Counts are flushed from the running process, not read from the `.cov` files Julia writes at exit:
+# a test that has to wait for the process to end cannot assert anything.
 
 @experimental """
 the counts come from two interfaces Julia does not document — `ccall(:jl_write_coverage_data, …)` \
@@ -163,13 +159,10 @@ function _entered_flag(mk::Mark)
     return p === nothing ? nothing : p[]
 end
 
-# The line range one declaration occupies: from the `@experimental` line to just before the next
-# statement BESIDE it. Read from the source rather than from the method, because a mark may cover
-# a `struct` or a name list, which have no method to ask.
-#
-# "Beside it" is the whole difficulty. The next `LineNumberNode` above the declaration is usually
-# the first line of its own body, so a span computed that way is one line long and reports every
-# multi-line definition as fully covered by its own signature.
+# The line range one declaration occupies, from the `@experimental` line to just before the next
+# statement BESIDE it. Read from the source, not the method: a mark may cover a `struct` or a name
+# list. The next `LineNumberNode` is usually the first line of its own body, and a span computed
+# that way is one line long and reports every multi-line definition as fully covered.
 function _definition_span(mk::Mark)
     lines = _source_lines(String(mk.file))
     lines === nothing && return nothing

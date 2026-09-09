@@ -1,11 +1,9 @@
-# Reading a module's marks back out. Everything here is read-only and allocation-cheap: these
-# are the functions a release script, a docs build or a test calls, and none of them should be
-# able to create a registry as a side effect of asking a question.
+# Reading a module's marks back out. Read-only: none of these may create a registry as a side
+# effect of asking a question.
 #
-# Two units live side by side. A NAME is what `names(m)` reports and what a release promises; a
-# METHOD is what a call site actually reaches. A mark attached to a definition is both — it names
-# something unsettled and knows which signature it attached to — so the queries below differ in
-# which of the two they answer, never in which marks they can see.
+# Two units side by side. A NAME is what `names(m)` reports and what a release promises; a METHOD
+# is what a call site reaches. A mark on a definition is both, so the queries differ in which of
+# the two they answer, never in which marks they can see.
 
 """
     experimental(m::Module; extensions = false) -> Vector{Mark}
@@ -190,13 +188,9 @@ function _marks_covering(m::Method)
     return sort!(out; by=mk -> (mk.sig !== nothing, _mark_order(mk)))
 end
 
-# Where a mark covering `m` can live, and nowhere else. The macro writes into the module the
-# definition is in, and `mark_method!` writes into `m.module` for the same reason — so a
-# signature-level mark is always in `m.module`. A whole-name mark is in the module that owns the
-# name, which is the only module in which that name means this generic.
-#
-# Two modules rather than a walk over every marked module in the process: this runs once per
-# resolved call site inside `reach`, and a world walk there would dominate the analysis.
+# Where a mark covering `m` can live, and nowhere else: a signature mark is always in `m.module`, a
+# whole-name mark in the module that owns the name. Two modules rather than a walk over every
+# marked module — this runs once per resolved call site inside `reach`.
 function _search_modules(m::Method)
     id = _ftype_identity(_sig_ftype(m.sig))
     (id === nothing || id.mod === m.module) && return (m.module,)

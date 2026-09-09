@@ -1,12 +1,7 @@
-# The examples are documentation that runs.
-#
-# `docs/src/walkthrough.md` is generated from `examples/walkthrough.jl` by Literate at build time,
-# so every output on that page is whatever the script printed. This file is the other half of that
-# arrangement: without it, a change in `src/` could quietly rewrite what the documentation claims
-# and nothing would go red until somebody read the rendered page.
-#
-# Twice in this package's first week a documented sample output turned out to be something the
-# code could not produce. Both would have failed here.
+# The examples are documentation that runs. `docs/src/walkthrough.md` is generated from
+# `examples/walkthrough.jl` by Literate, so without this a change in `src/` could rewrite what the
+# documentation claims and nothing would go red. Two shipped sample outputs turned out to be
+# something the code could not produce; both would have failed here.
 
 using ExperimentalAPI: ExperimentalAPI, entered, reach, verdict
 using Test

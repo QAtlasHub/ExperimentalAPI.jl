@@ -1,8 +1,6 @@
-# What can carry a mark: function, method, struct, const, module, macro, extension.
-#
-# Scope: both units. A mark names something, and — when it attached to a definition — also records
-# the signature it attached to, so the same declaration answers `audit`'s question about the name
-# and `reach`'s question about the method.
+# What can carry a mark: function, method, struct, const, module, macro, extension. A mark names
+# something and, when attached to a definition, records the signature too — so one declaration
+# answers `audit`'s question about the name and `reach`'s about the method.
 
 using ExperimentalAPI: ExperimentalAPI, @experimental, Mark, experimental, isexperimental
 using Test

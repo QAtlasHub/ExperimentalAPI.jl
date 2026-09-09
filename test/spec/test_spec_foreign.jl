@@ -1,8 +1,7 @@
-# Marking a method on somebody else's generic — the `QAtlas.fetch` case, refused outright today.
+# Marking a method on somebody else's generic — the `QAtlas.fetch` case.
 #
-# Scope: `audit` files a name bound elsewhere under `foreign` and says nothing about the methods
-# we contributed to it. Extending another package's generic is the normal Julia idiom, so a mark
-# that cannot attach there cannot describe the surface that matters.
+# `audit` files a name bound elsewhere under `foreign`. Extending another package's generic is the
+# normal idiom, so a mark that cannot attach there cannot describe the surface that matters.
 
 using ExperimentalAPI: ExperimentalAPI, @experimental, audit, experimental, isexperimental
 using Test

@@ -1,8 +1,5 @@
-# Where the mark has to surface outside this package: docs, Aqua, releases, provenance, CI.
-#
-# Scope: a mark only `ExperimentalAPI` can read is a private note. Everything here is pure or
-# touches a temporary file except the Documenter block, which needs a test dependency this
-# package does not have — so nothing in this group is blocked on infrastructure.
+# Where the mark has to surface outside this package: docs, Aqua, releases, provenance, CI. A mark
+# only `ExperimentalAPI` can read is a private note.
 
 using ExperimentalAPI: ExperimentalAPI, @experimental, experimental
 using Documenter: Documenter

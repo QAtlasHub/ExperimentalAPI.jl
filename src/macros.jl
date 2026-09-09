@@ -1,9 +1,6 @@
-# The expression-level spelling of the observing layer.
-#
-# `record(() -> f(x))` is the function form and it is what everything here is built on. The macro
-# earns its place by knowing two things a closure cannot: the source text of the expression, and
-# the line it was written on. A report that says which call went through unvalidated code, and
-# where that call is, is a different thing from a list of names.
+# The expression-level spelling of the observing layer, built on `record(() -> f(x))`. The macro
+# earns its place by knowing two things a closure cannot: the source text of the expression and
+# the line it was written on.
 
 @experimental """
 the report is a text format with no schema, and it has already changed twice in its first week — \

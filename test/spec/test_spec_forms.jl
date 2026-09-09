@@ -1,8 +1,6 @@
-# The definition forms a real package hits on its second afternoon: kwargs, parametric
-# signatures, callable structs, constructors, operators, stacked macros.
-#
-# Scope: each form either works, or the refusal names the alternative. Silently marking the wrong
-# symbol is the outcome this file exists to prevent.
+# The definition forms a real package hits on its second afternoon: kwargs, parametric signatures,
+# callable structs, constructors, operators, stacked macros. Each either works or is refused by
+# name; silently marking the wrong symbol is what this file prevents.
 
 using ExperimentalAPI: ExperimentalAPI, @experimental, experimental, isexperimental, mark
 using Test
@@ -159,12 +157,9 @@ end
 end
 
 @testset "@inline and the mark compose in both orders" begin
-    # "Compose" was asserted as `Set([:f, :g])` — the names are marked — and that is satisfied by
-    # a mark that can never fire. Measured: the two orders did NOT compose the same way. With the
-    # mark outside, `_instrument` saw a `:macrocall` and returned `nothing`, so the flag was
-    # registered and nothing ever set it; with the mark inside, the flag worked. `entered` said
-    # `[:g]` after calling both. An `@inline` kernel is exactly what this package is for, so the
-    # claim has to be about the observation, not about the name.
+    # `Set([:f, :g])` — the names are marked — is satisfied by a mark that can never fire. Measured:
+    # with the mark outside the flag was registered and nothing set it, and `entered` said `[:g]`
+    # after calling both. The claim has to be about the observation.
     @eval module InlineMarked
     using ExperimentalAPI
     @experimental "kernel unverified" @inline f(x) = x
@@ -223,13 +218,9 @@ end
 end
 
 @testset "a mark inside a function body is refused" begin
-    # Refused by Julia, not by this package: `const` in local scope fails during lowering, before
-    # any emitted code runs, so no check of ours can intercept it. The one lever is where the
-    # error points, and the expansion carries the caller's `LineNumberNode`.
-    #
-    # The misuse must arrive from a FILE: written through `@eval` the message carries no location
-    # at all, so a location assertion made that way is vacuous. Built line by line so the
-    # formatter cannot shift line 4.
+    # Refused by Julia during lowering, before any emitted code runs. The one lever is where the error
+    # points. The misuse must arrive from a FILE — through `@eval` the message carries no location at
+    # all, so the assertion would be vacuous. Built line by line so the formatter cannot shift line 4.
     dir = mktempdir()
     path = joinpath(dir, "caller_side.jl")
     write(
@@ -264,21 +255,14 @@ end
 end
 
 @testset "the refusal cannot name @experimental, and that is now a decision" begin
-    # WITHDRAWN, with the measurement that withdrew it. The requirement was that the message name
-    # `@experimental`. It cannot, and the three routes are exhausted:
+    # WITHDRAWN: the message cannot name `@experimental`. Measured on 1.12.2 —
     #
-    #   * `const` in local scope fails during LOWERING, before any emitted code runs, so no check
-    #     of ours can intercept it — and Julia's message does not name the variable either, so
-    #     naming the binding `var"@experimental ..."` does not smuggle the word in. Measured on
-    #     1.12.2: the message is byte-identical for `:__EXPERIMENTAL_API_MARKS__` and for a
-    #     binding whose name is the whole sentence.
-    #   * `global`, the one expansion that avoids `const`, fails SILENTLY in local scope — a
-    #     worse outcome than a loud message pointing at the wrong vocabulary.
-    #   * creating the registry through `Core.eval` removes the error altogether, which turns a
-    #     refusal into a mark registered when the enclosing function is first called.
+    #   * `const` fails during lowering and Julia's message names no variable, so a binding called
+    #     `var"@experimental ..."` changes nothing: byte-identical either way.
+    #   * `global`, the one expansion avoiding `const`, fails SILENTLY in local scope.
+    #   * `Core.eval` removes the error and registers the mark on first call instead.
     #
-    # What is kept is the part that is in this package's hands and is asserted above: the blame
-    # lands on the line the author wrote, and never inside this package.
+    # What is kept is asserted above: the blame lands on the author's line, never inside this package.
     e = try
         @eval module ClosureMarked2
         using ExperimentalAPI

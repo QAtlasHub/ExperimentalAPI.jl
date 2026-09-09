@@ -1,10 +1,8 @@
-# The release-decision layer: write the covenant down at release time, and read a diff of two of
-# them at review time. This is the payoff for marking anything at all — "changing an experimental
-# name is not breaking" stops being an argument and becomes a function call.
+# Write the covenant down at release time, diff two of them at review time — "changing an
+# experimental name is not breaking" stops being an argument and becomes a function call.
 #
-# Two units, one file, one schema. Names are what `names(m)` promises; methods are what a call
-# site reaches, and a package whose surface is methods on somebody else's generic has no name-level
-# covenant at all. The two live in one snapshot so that a repository has one file to commit.
+# Names and methods in one snapshot, so a repository has one file to commit: a package whose
+# surface is methods on somebody else's generic has no name-level covenant at all.
 @experimental """
 the snapshot schema is young: nothing has been released against it, and the method half was added \
 after the name half, so a file written by one version may not be readable by the next

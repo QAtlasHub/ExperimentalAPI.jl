@@ -67,11 +67,9 @@ end
     end
 end
 
-# Which half of each claim below can run depends on whether this process has coverage counters at
-# all. Both halves are assertions: without `--code-coverage` the contract under test is that the
-# answer is `missing` rather than a number, and that contract is exactly what stops every marked
-# definition being reported unverified on an ordinary run. CI runs the suite with coverage on, so
-# the measured half is what gates a pull request.
+# Which half runs depends on whether this process has coverage counters. Both are assertions:
+# without `--code-coverage` the contract is that the answer is `missing` rather than a number,
+# which is what stops every marked definition being reported unverified on an ordinary run.
 const COVERED = ExperimentalAPI.coverage_enabled()
 
 @testset "the run knows whether it has coverage counters at all" begin

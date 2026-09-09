@@ -1,17 +1,11 @@
-# A caller that never names a marked thing still depends on it.
-#
-# Modelled on Lean's `sorry`, but Julia's call graph is not closed, so the answer is three-valued:
+# A caller that never names a marked thing still depends on it. Julia's call graph is not closed,
+# so the answer is three-valued:
 #
 #     :depends   a marked definition is reachable
 #     :clean     the whole call graph was resolved and nothing marked is in it
 #     :unknown   some call site could not be resolved — the honest non-answer
 #
-# Scope: collapsing `:unknown` into `:clean` is the one failure this file exists to prevent. It is
-# not a weaker claim, it is a false one.
-#
-# The mechanism is a `Core.Compiler.AbstractInterpreter` hooking `abstract_call_method`, because
-# inference runs before inlining; `code_typed(...; optimize=true)` sees only `mul_float` and finds
-# nothing.
+# Reporting `:unknown` as `:clean` is the one failure this file prevents.
 
 using ExperimentalAPI: ExperimentalAPI, @experimental, experimental
 using Test
@@ -219,15 +213,11 @@ end
 # ── termination ──────────────────────────────────────────────────────────────────────────────
 
 @testset "a higher-order argument is answered, not thrown out of and not hung on" begin
-    # `sum(f(x) for x in xs)` lowers to a `Base.MappingRF` whose two fields are both singletons,
-    # which makes the STRUCT a singleton — so `w.instance` exists for a callable that is neither a
-    # `Function` nor a `Type`. `nameof` has no method for that, and the analysis died with a
-    # `MethodError` instead of returning one of its three verdicts. Measured on the shape this
-    # package's own `@entered` docstring uses as its worked example.
+    # `sum(f(x) for x in xs)` lowers to a `Base.MappingRF` whose fields are both singletons, so the
+    # struct is one too and `w.instance` exists for a callable `nameof` has no method for.
     #
-    # Removing the throw then exposed the second half: on 1.14.0-DEV `[f(x) for x in xs]` and
-    # `sum(map(f, xs))` generated new signatures faster than `maxdepth` could stop them and the
-    # call never returned, while both answer in milliseconds on 1.12. `maxwork` bounds the total.
+    # Removing the throw exposed the second half: on 1.14.0-DEV `[f(x) for x in xs]` and
+    # `sum(map(f, xs))` never returned, while both answer in milliseconds on 1.12.
     #
     # A throw is not a fourth verdict and neither is a hang.
     for f in (Chain.gen_bad, Chain.gen_good, Chain.comp_bad, Chain.map_bad, Chain.loop_good)
@@ -308,14 +298,10 @@ end
 # ── across packages ──────────────────────────────────────────────────────────────────────────
 
 @testset "a mark in a dependency propagates into the dependent" begin
-    # `reach isa Function` was the whole of this claim for a while, and it is satisfied by an
-    # implementation that answers `:clean` for everything. The real question is whether a mark
-    # written while ANOTHER package was precompiled — in a process that has since exited — is
-    # visible to a caller here, and that needs a package rather than a module.
-    #
-    # `test/test_precompile.jl` is where it is asked, because it is the file that owns the scratch
-    # depot and the two subprocess runs. This asserts it is asked there rather than restating it:
-    # a claim checked in one place and mentioned in another is one that goes stale in the second.
+    # `reach isa Function` was the whole of this claim once, and an implementation answering `:clean`
+    # for everything satisfies it. The real question needs a package: is a mark written during ANOTHER
+    # package's precompilation visible here? `test/test_precompile.jl` owns the scratch depot, so this
+    # asserts the claim is asked there rather than restating it.
     src = read(joinpath(@__DIR__, "..", "test_precompile.jl"), String)
     @test occursin("REACH=", src)
     @test occursin("\"REACH\"] == \"depends\"", src)

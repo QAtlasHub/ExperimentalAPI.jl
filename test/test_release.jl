@@ -1,9 +1,6 @@
-# The release-decision layer: a snapshot survives a round trip through TOML, and a diff of two
-# snapshots says which moves break callers.
-#
-# The fixture is a pair of hand-written snapshots rather than two loaded versions of a package,
-# because that is how a real caller uses it: the old side comes off disk, from a file committed
-# at the last release.
+# The release-decision layer: a snapshot survives a TOML round trip, and a diff of two says which
+# moves break callers. Hand-written snapshots rather than two loaded versions, because that is how
+# a caller uses it — the old side comes off disk.
 
 using ExperimentalAPI:
     Diff, compare, isbreaking, read_snapshot, snapshot, stable, write_snapshot, experimental

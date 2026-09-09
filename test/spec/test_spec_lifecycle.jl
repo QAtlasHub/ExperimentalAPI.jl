@@ -1,8 +1,5 @@
-# The mark's exit — when it may be removed — and entry points that are not a single function.
-#
-# Scope: a mark that can only ever be added is a decoration. The exit is what makes it a work
-# item. The entry point has to be a module or a script, as `#print axioms` answers for any
-# declaration and not only for one it is handed.
+# The mark's exit — when it may be removed — and entry points that are not a single function. A
+# mark that can only ever be added is a decoration; the exit makes it a work item.
 
 using ExperimentalAPI: ExperimentalAPI, @experimental, audit, experimental, mark
 using Test
@@ -91,17 +88,12 @@ end
     @test ExperimentalAPI.verdict(ExperimentalAPI.reach(Main.CleanModule)) === :clean
 end
 
-# Run in a child process and read its stderr, because the failure it guards is a WARNING today and
-# an error later: reading a binding in a world prior to its definition world. `reach_script`
-# evaluates a script's `const` lines into a scratch module and then analyses a thunk that names
-# them, and the walk reads globals out of the IR — so it is the one place in this package that
-# reaches a binding younger than its own caller.
+# A child process, because what it guards is a warning today and an error later: reading a binding
+# in a world prior to its definition world.
 #
-# Two things about the child are load bearing, and the first cost a test that could not fail.
-# `reach_script` is called from inside a FUNCTION: a caller's world age is fixed when it is
-# entered, and at top level it moves with every statement, so nothing is caught there. And the
-# child runs with the DEFAULT `depwarn`: measured on 1.12.2, `--depwarn=error` *suppresses* this
-# warning rather than promoting it, which is the opposite of what Julia's own hint says.
+# Two things about the child are load bearing. `reach_script` is called from inside a FUNCTION —
+# at top level the world age moves with every statement and nothing is caught. And the child runs
+# with the DEFAULT `depwarn`: measured on 1.12.2, `--depwarn=error` SUPPRESSES this warning.
 const _WORLD_AGE_SCRIPT = """
 using ExperimentalAPI
 module L
@@ -139,12 +131,9 @@ print("OK")
 end
 
 @testset "a script can be the entry point" begin
-    # The shape a researcher has: a file that produces a figure, not a package. The file must be
-    # written — `tempname()` alone throws regardless of the implementation.
-    #
-    # `hasproperty(…, :reached)` was the whole of this claim for a while, and it is satisfied by
-    # an implementation that returns an empty `Reach` for every input. So the script that reaches
-    # a mark and the one that does not are both run, and the verdicts have to differ.
+    # A file that produces a figure, not a package. `hasproperty(…, :reached)` was the whole of this
+    # claim once, and an implementation returning an empty `Reach` for every input satisfies it — so
+    # both scripts are run and the verdicts have to differ.
     dir = mktempdir()
     plain = joinpath(dir, "plain.jl")
     write(plain, "1 + 1\n")
