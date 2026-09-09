@@ -240,22 +240,18 @@ Run `f` under a test set that records instead of propagating, and say whether an
 failed. This is how a gate is shown to fire without the failure it is supposed to produce
 reaching the suite that is checking for it.
 """
-# Every `@testset` description `f` produced. A gate's description is user-facing text — it is what
-# a reader sees when CI goes red — so it is worth asserting on, not only the pass/fail. In a
-# function for the same reason `gate_failed` is: a `@testset` written inline here would be counted
-# as a behaviour of this file that carries no assertion of its own.
-function gate_descriptions(f)
-    ts = @testset Collect "probe" begin
-        f()
-    end
-    return _descriptions(ts)
-end
-
 function gate_failed(f)
     ts = @testset Collect "probe" begin
         f()
     end
     return any(r -> r isa Test.Fail || r isa Test.Error, _flatten(ts))
+end
+
+function gate_descriptions(f)
+    ts = @testset Collect "probe" begin
+        f()
+    end
+    return _descriptions(ts)
 end
 
 _flatten(ts::Collect) = reduce(vcat, (_flatten(r) for r in ts.results); init=Any[])
