@@ -220,8 +220,9 @@ end
 # `@testset` — so the failing direction has to be run under a test set that records instead of
 # propagating. Two lines of `AbstractTestSet` is the whole cost of checking that.
 struct Collect <: Test.AbstractTestSet
+    description::String
     results::Vector{Any}
-    Collect(::AbstractString) = new(Any[])
+    Collect(d::AbstractString) = new(String(d), Any[])
 end
 Test.record(ts::Collect, res) = (push!(ts.results, res); res)
 # A nested `@testset` that does not name a type inherits the enclosing one, so every set inside
@@ -246,7 +247,25 @@ function gate_failed(f)
     return any(r -> r isa Test.Fail || r isa Test.Error, _flatten(ts))
 end
 
+function gate_descriptions(f)
+    ts = @testset Collect "probe" begin
+        f()
+    end
+    return _descriptions(ts)
+end
+
 _flatten(ts::Collect) = reduce(vcat, (_flatten(r) for r in ts.results); init=Any[])
+
+# Every `@testset` description in the tree. A gate's description is user-facing text — it is what
+# a reader sees when CI goes red — so it is worth asserting on and not only the pass/fail.
+function _descriptions(ts::Collect)
+    return vcat(
+        [ts.description],
+        reduce(
+            vcat, (_descriptions(r) for r in ts.results if r isa Collect); init=String[]
+        ),
+    )
+end
 function _flatten(ts::Test.DefaultTestSet)
     return reduce(vcat, (_flatten(r) for r in ts.results); init=Any[])
 end
@@ -278,6 +297,10 @@ end
     @test ExperimentalAPI.test_surface(Shown; max_marks=1) isa ExperimentalAPI.Audit
     @test !gate_failed(() -> ExperimentalAPI.test_surface(Shown; max_marks=1))
     @test gate_failed(() -> ExperimentalAPI.test_surface(Shown; max_marks=0))
+    # …and the cap of one names itself in the singular. One is the cap a package sets when it
+    # means "the next mark is a decision", so it is the description most likely to be read.
+    descs = gate_descriptions(() -> ExperimentalAPI.test_surface(Shown; max_marks=1))
+    @test any(d -> occursin("at most 1 mark", d) && !occursin("at most 1 marks", d), descs)
 end
 
 @testset "a mark older than N releases is reported" begin
