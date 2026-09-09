@@ -35,7 +35,12 @@ public unstable,
     CONSTANT_BAD,
     top_uses_const,
     MarkedStruct,
-    top_constructs
+    top_constructs,
+    gen_bad,
+    gen_good,
+    comp_bad,
+    map_bad,
+    loop_good
 
 @experimental "convergence is not established below β ≈ 0.1" unstable(x::Float64) =
     x * 1.0000001
@@ -88,6 +93,20 @@ top_uses_const(x::Float64) = x + CONSTANT_BAD
     v::Float64
 end
 top_constructs(x::Float64) = MarkedStruct(x).v
+
+# Higher-order shapes. `sum(f(x) for x in xs)` is the idiom this package's own docstrings use, and
+# it reaches the marked definition through a closure the caller never names.
+gen_bad(xs::Vector{Float64}) = sum(unstable(x) for x in xs)
+gen_good(xs::Vector{Float64}) = sum(solid(x) for x in xs)
+comp_bad(xs::Vector{Float64}) = [unstable(x) for x in xs]
+map_bad(xs::Vector{Float64}) = sum(map(unstable, xs))
+loop_good(xs::Vector{Float64}) = (
+    t=0.0;
+    for x in xs
+        t += solid(x)
+    end;
+    t
+)
 
 end # module Chain
 
@@ -198,6 +217,28 @@ end
 end
 
 # ── termination ──────────────────────────────────────────────────────────────────────────────
+
+@testset "a generator argument is answered, not thrown out of" begin
+    # `sum(f(x) for x in xs)` lowers to a `Base.MappingRF` whose two fields are both singletons,
+    # which makes the STRUCT a singleton — so `w.instance` exists for a callable that is neither a
+    # `Function` nor a `Type`. `nameof` has no method for that, and the analysis died with a
+    # `MethodError` instead of returning one of its three verdicts. Measured on the shape this
+    # package's own `@entered` docstring uses as its worked example.
+    #
+    # A throw is not a fourth verdict. `:unknown` is what "could not resolve this" is for.
+    for (f, want) in (
+        (Chain.gen_bad, :depends),
+        (Chain.gen_good, :clean),
+        (Chain.comp_bad, :depends),
+        (Chain.map_bad, :depends),
+        (Chain.loop_good, :clean),
+    )
+        @testset "$(nameof(f))" begin
+            r = ExperimentalAPI.reach(f, Tuple{Vector{Float64}})
+            @test ExperimentalAPI.verdict(r) === want
+        end
+    end
+end
 
 @testset "self-recursion terminates and still finds the mark" begin
     @test ExperimentalAPI.verdict(
