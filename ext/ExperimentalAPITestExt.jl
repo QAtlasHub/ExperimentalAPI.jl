@@ -82,7 +82,7 @@ function ExperimentalAPI.test_surface(
         # The ratchet. `nothing` rather than `typemax`: a cap that is off must not read as a cap
         # that is enormous, because the second is a number somebody has to justify.
         if max_marks !== nothing
-            @testset "at most $max_marks marks" begin
+            @testset "at most $max_marks mark$(max_marks == 1 ? "" : "s")" begin
                 @test length(experimental(m)) <= max_marks
             end
         end
