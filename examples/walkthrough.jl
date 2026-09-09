@@ -115,8 +115,19 @@ record(() -> Ising.normalise(βs, 0.5); paths=false, timing=false)
 #
 # [`@entered`](@ref) asks the same question about a single expression, and returns its value, so
 # it drops into existing code the way `@time` does.
+#
+# Written here as `@entered <io> expr` and printed, because Documenter's `@example` renders a
+# block's **value** when it has one and its captured output only when the value is `nothing` —
+# measured with a control, a plain `println` followed by `99` loses its line the same way. Run
+# from a terminal, `ExperimentalAPI.@entered Ising.report(βs)` prints the report itself.
 
-value = ExperimentalAPI.@entered Ising.report(βs)
+report = IOBuffer()
+value = ExperimentalAPI.@entered report Ising.report(βs)
+print(String(take!(report)))
+
+#-
+
+value
 
 # ## How often, and how much of the run
 #
