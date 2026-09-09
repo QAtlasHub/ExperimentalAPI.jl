@@ -25,6 +25,7 @@ using Test
     include("spec/test_spec_dispatch.jl")
     include("spec/test_spec_lifecycle.jl")
     include("test_spec_table.jl")
+    include("test_examples.jl")
     include("test_readme.jl")
     include("test_aqua.jl")
 end

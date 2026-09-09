@@ -1,5 +1,15 @@
 using ExperimentalAPI
 using Documenter
+using Literate
+
+# The walkthrough page is GENERATED from a script that runs, rather than written as prose with
+# its outputs typed underneath. Twice in this package's first week a documented sample output was
+# something the code could not produce; the source of that page is `examples/walkthrough.jl`, it
+# is executed by `test/test_examples.jl`, and the outputs below it are whatever it printed.
+const EXAMPLES = joinpath(@__DIR__, "..", "examples")
+Literate.markdown(
+    joinpath(EXAMPLES, "walkthrough.jl"), joinpath(@__DIR__, "src"); documenter=true
+)
 
 makedocs(;
     sitename="ExperimentalAPI.jl",
@@ -24,6 +34,7 @@ makedocs(;
     checkdocs=:public,
     pages=[
         "Home" => "index.md",
+        "Walkthrough" => "walkthrough.md",
         "Declaring" => "declaring.md",
         "Observing" => "observing.md",
         "Analysing" => "analysing.md",

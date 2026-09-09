@@ -1,0 +1,7 @@
+# Hand-written, never `Pkg.add`ed: a resolve here would rewrite the `[sources]` path and re-sort
+# what follows. `docs/Project.toml` is the same shape for the same reason.
+[deps]
+ExperimentalAPI = "fd2d14cb-3a46-42a9-afd8-e8499236f05e"
+
+[sources]
+ExperimentalAPI = {path = ".."}
